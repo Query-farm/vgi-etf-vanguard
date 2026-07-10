@@ -15,7 +15,7 @@ SET search_path='vg.main';
 query T
 SELECT string_agg(column_name, ',') FROM (DESCRIBE SELECT * FROM vg.holdings WHERE fund_ticker = 'VOO');
 ----
-fund_ticker,as_of_date,name,ticker,isin,cusip,sedol,weight_percent,market_value,shares_held,notional_value,sec_type,coupon_percent,maturity,face_amount
+fund_ticker,holding_rank,as_of_date,name,ticker,isin,cusip,sedol,weight_percent,market_value,shares_held,notional_value,sec_type,coupon_percent,maturity,face_amount
 
 query T
 SELECT column_type FROM (DESCRIBE SELECT * FROM vg.holdings WHERE fund_ticker = 'VOO') WHERE column_name = 'as_of_date';

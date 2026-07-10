@@ -4,3 +4,6 @@ dist/
 .env
 .DS_Store
 duckdb_unittest_tempdir/
+# vgi-lint --ai drops these review/agent-sim caches in the cwd; never commit them.
+.vgi-review-cache.json
+.vgi-sim-cache.json

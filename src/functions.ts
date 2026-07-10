@@ -51,6 +51,7 @@ export type VanguardGet = (url: string) => Promise<unknown>;
 
 const HOLDINGS_SCAN_DESCS: Record<string, string> = {
   fund_ticker: "The fund's ticker — the partition filter (e.g. VOO).",
+  holding_rank: "1-based position within the fund, ordered by descending weight (largest holding = 1). With fund_ticker, the row's primary key.",
   as_of_date: "The as-of date Vanguard reports for these holdings.",
   name: "Constituent / issue name.",
   ticker: "Constituent ticker (the holding's own ticker; distinct from fund_ticker).",
@@ -217,16 +218,32 @@ export function makeProductsScan(get: VanguardGet) {
 // Multiple parallel workers drain the same queue, so the all-funds fan-out is work-stealing and
 // bounded by maxWorkers. filterPushdown + being LISTED is what lets DuckDB push fund_ticker here.
 
+interface HoldingsScanArgs {
+  fund_ticker: string | null;
+}
+
+const HOLDINGS_SCAN_FUND_DOC =
+  "Optional single fund to scan, given as its exchange ticker like 'VOO'. Convenience shorthand " +
+  "for the pushdown filter: holdings_scan(fund_ticker := 'VOO') is equivalent to the holdings table filtered to " +
+  "that fund. Omit it (holdings_scan()) to scan every fund, optionally narrowing with a " +
+  "WHERE fund_ticker = … clause instead. Case-insensitive; upper-cased internally.";
+
 export function makeHoldingsScan(get: VanguardGet) {
   const schema = holdingsSchema();
-  return defineTableFunction<Record<string, never>, Record<string, never>>({
+  return defineTableFunction<HoldingsScanArgs, Record<string, never>>({
     name: "holdings_scan",
     description:
       "Backing scan for the holdings table — prefer the `holdings` table. Detailed current fund " +
-      "holdings, hive-partitioned by fund_ticker: filter WHERE fund_ticker = 'VOO' (or " +
-      "fund_ticker IN (…)) for specific funds, or scan with no filter to stream every fund's " +
-      "holdings. weight_percent is in percent points; bond funds also fill coupon/maturity/face.",
-    args: {},
+      "holdings, hive-partitioned by fund_ticker: pass a single fund as holdings_scan(fund_ticker := 'VOO'), or " +
+      "filter WHERE fund_ticker = 'VOO' (or fund_ticker IN (…)) for specific funds, or scan with " +
+      "no filter to stream every fund's holdings. weight_percent is in percent points; bond funds " +
+      "also fill coupon/maturity/face.",
+    // Optional convenience arg: pick one fund directly. The `holdings` base table binds this scan
+    // with zero args (fund_ticker → null), relying on pushdown; a direct holdings_scan(fund_ticker := 'VOO') call
+    // supplies the fund up front. onInit unions the arg with any pushed fund_ticker filter.
+    args: { fund_ticker: new Utf8() },
+    argDefaults: { fund_ticker: null },
+    argDocs: { fund_ticker: HOLDINGS_SCAN_FUND_DOC },
     // filterPushdown MUST be declared AND this function MUST be listed in the catalog so the DuckDB
     // extension can discover the capability and push the fund_ticker filter into the scan. Each
     // fund is one SINGLE_VALUE partition (fund_ticker is the hive partition key).
@@ -235,15 +252,23 @@ export function makeHoldingsScan(get: VanguardGet) {
     maxWorkers: DEFAULT_MAX_WORKERS,
     onBind: () => ({ outputSchema: schema }),
     // Seed the work queue (once, on the coordinator): one item per target fund.
-    onInit: async ({ initCall, executionId, storage }) => {
-      // Pushed fund_ticker value(s) from WHERE (= or IN), if any. Absent → scan all funds.
+    onInit: async ({ args, initCall, executionId, storage }) => {
+      // Pushed fund_ticker value(s) from WHERE (= or IN), if any, UNIONed with the optional
+      // fund_ticker argument. Absent both → scan all funds.
       const joinKeys = buildJoinKeysLookup(initCall.join_keys);
       const filters = initCall.pushdown_filters
         ? deserializeFilters(initCall.pushdown_filters, joinKeys)
         : undefined;
-      const requested = (filters?.getColumnValues("fund_ticker") ?? []).map((t) =>
-        String(t).toUpperCase(),
-      );
+      const argTicker =
+        args.fund_ticker != null && String(args.fund_ticker).trim() !== ""
+          ? [String(args.fund_ticker).trim().toUpperCase()]
+          : [];
+      const requested = [
+        ...new Set([
+          ...(filters?.getColumnValues("fund_ticker") ?? []).map((t) => String(t).toUpperCase()),
+          ...argTicker,
+        ]),
+      ];
       // Build the fund set from the (cached) ETF catalog. One fetch either way.
       const products = await fetchProducts(get);
       const byTicker = new Map(
@@ -279,24 +304,28 @@ export function makeHoldingsScan(get: VanguardGet) {
       }
     },
     examples: [
-      { sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings_scan() WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 10", description: "Top 10 holdings of VOO via the backing scan" },
-      { sql: "SELECT fund_ticker, count(*) FROM vanguard.main.holdings_scan() WHERE fund_ticker IN ('VOO', 'BND') GROUP BY fund_ticker", description: "Two partitions at once (fan-out)" },
+      { sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings_scan(fund_ticker := 'VOO') ORDER BY weight_percent DESC LIMIT 10", description: "Top 10 holdings of VOO via the backing scan (fund passed as an argument)" },
+      { sql: "SELECT fund_ticker, count(*) FROM vanguard.main.holdings_scan() WHERE fund_ticker IN ('VOO', 'BND') GROUP BY fund_ticker", description: "Two partitions at once via a pushdown filter (fan-out)" },
     ],
     tags: {
       "vgi.category": "holdings",
       "vgi.doc_llm":
-        "The backing scan for the `holdings` table. Prefer querying the `holdings` table. " +
+        "The backing scan for the `holdings` table. Prefer querying the `holdings` table. Takes an " +
+        "optional single fund_ticker argument: holdings_scan(fund_ticker := 'VOO') scans just that fund. " +
         "Hive-partitioned by fund_ticker (the fund's ticker, distinct from the constituent " +
-        "`ticker` column): filter WHERE fund_ticker = '…' (or fund_ticker IN (…)) for specific " +
-        "funds, or scan with no filter to stream every fund (over a hundred partitions — slow). " +
-        "Holdings are current-only (no historical as-of). weight_percent is in percent points " +
-        "(7.89 = 7.89%); bond funds also fill coupon/maturity/face.",
+        "`ticker` column): pass the fund as the argument, or filter WHERE fund_ticker = '…' (or " +
+        "fund_ticker IN (…)) for specific funds, or scan with no argument/filter to stream every " +
+        "fund (over a hundred partitions — slow). Holdings are current-only (no historical " +
+        "as-of). weight_percent is in percent points (7.89 = 7.89%); bond funds also fill " +
+        "coupon/maturity/face.",
       "vgi.doc_md":
         "## holdings_scan\n\n" +
-        "The backing scan for the **`holdings` table** — prefer the table. Hive-partitioned by " +
-        "`fund_ticker`: filter `WHERE fund_ticker = 'VOO'` for one fund, or scan with no filter to " +
-        "stream every fund (see the example queries). `fund_ticker` is distinct from the " +
-        "constituent `ticker` column. Holdings are current-only (no historical as-of).",
+        "The backing scan for the **`holdings` table** — prefer the table. Takes an optional " +
+        "`fund_ticker` argument: `holdings_scan(fund_ticker := 'VOO')` scans one fund. Hive-partitioned by " +
+        "`fund_ticker`: pass the fund as the argument, filter `WHERE fund_ticker = 'VOO'`, or scan " +
+        "with no argument to stream every fund (see the example queries). `fund_ticker` is " +
+        "distinct from the constituent `ticker` column. Holdings are current-only (no historical " +
+        "as-of).",
       "vgi.result_columns_schema": resultColumnsSchema(holdingsSchema(), HOLDINGS_SCAN_DESCS),
     },
   });

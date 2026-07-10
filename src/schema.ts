@@ -136,6 +136,11 @@ export function holdingsSchema(): Schema {
   return new Schema([
     // fund_ticker is the hive partition key: holdings_scan emits one SINGLE_VALUE partition per fund.
     partitionField("fund_ticker", new Utf8()),
+    // holding_rank is the 1-based position of the row within its fund (weight-descending, as
+    // Vanguard reports it). It gives each aggregated holding a stable identity — (fund_ticker,
+    // holding_rank) is the table's primary key — since bond funds aggregate lots so no natural
+    // identifier (cusip/ticker) is unique or always present.
+    f("holding_rank", new Int64()),
     f("as_of_date", date()),
     f("name", new Utf8()),
     f("ticker", new Utf8()),
@@ -157,6 +162,10 @@ export function holdingsBatch(schema: Schema, rows: HoldingRow[]) {
   return batchFromColumns(
     {
       fund_ticker: rows.map((r) => r.fundTicker),
+      // Per-fund ordinal (1-based), assigned in the order Vanguard returns the holdings
+      // (weight-descending). Each partition batch carries exactly one fund's rows, so this is a
+      // stable per-fund row identity — the second half of the (fund_ticker, holding_rank) key.
+      holding_rank: rows.map((_, i) => BigInt(i + 1)),
       as_of_date: rows.map((r) => dateOrNull(r.asOfDate)),
       name: rows.map((r) => r.name),
       ticker: rows.map((r) => r.ticker),

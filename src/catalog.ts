@@ -82,6 +82,7 @@ const PRODUCTS_TABLE_TAGS: Record<string, string> = {
 /** Per-column comments for the holdings table. */
 const HOLDINGS_COLUMN_COMMENTS: Record<string, string> = {
   fund_ticker: "The fund's ticker (e.g. VOO) — the hive partition key; constant for every row of a fund. Filter on it to pick funds; omit to stream all.",
+  holding_rank: "1-based position of this holding within the fund, ordered by descending weight as Vanguard reports it. With fund_ticker it uniquely identifies the row (the primary key); the largest holding is holding_rank = 1.",
   as_of_date: "The as-of date Vanguard reports for these holdings (current holdings only).",
   name: "Constituent / issue name.",
   ticker: "Constituent ticker (the holding's own ticker; distinct from fund_ticker).",
@@ -311,8 +312,13 @@ export function makeCatalog(
             name: "holdings",
             function: holdingsScan,
             arguments: new Arguments([], new Map()),
-            // fund_ticker is always populated (the scan tags every row with its fund).
-            notNull: ["fund_ticker"],
+            // (fund_ticker, holding_rank) uniquely identifies a row: fund_ticker is the partition,
+            // holding_rank is the 1-based per-fund position. Both are always populated by the scan.
+            // Vanguard aggregates bond lots, so no natural constituent id (cusip/ticker) is unique
+            // or always present — the ordinal surrogate gives each row a stable identity. Advisory
+            // (not enforced on scan).
+            notNull: ["fund_ticker", "holding_rank"],
+            primaryKey: [["fund_ticker", "holding_rank"]],
             // Hive partition key: fund_ticker. A WHERE fund_ticker = … / IN (…) filter is pushed
             // down to fetch just those funds; an unfiltered scan streams every fund (all
             // partitions). Vanguard holdings are current-only — NO time travel.
