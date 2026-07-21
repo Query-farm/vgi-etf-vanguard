@@ -326,6 +326,14 @@ export function makeHoldingsScan(get: VanguardGet) {
         "with no argument to stream every fund (see the example queries). `fund_ticker` is " +
         "distinct from the constituent `ticker` column. Holdings are current-only (no historical " +
         "as-of).",
+      // Carry the same examples through the description-preserving example_queries tag: the VGI
+      // extension re-surfaces Meta.examples into duckdb_functions().examples as a bare SQL VARCHAR[]
+      // (descriptions dropped), so without this the descriptions are invisible to vgi-lint (VGI515).
+      // Byte-identical SQL to the `examples:` above; the linter dedups by normalized SQL.
+      "vgi.example_queries": JSON.stringify([
+        { description: "Top 10 holdings of VOO via the backing scan (fund passed as an argument)", sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings_scan(fund_ticker := 'VOO') ORDER BY weight_percent DESC LIMIT 10" },
+        { description: "Two partitions at once via a pushdown filter (fan-out)", sql: "SELECT fund_ticker, count(*) FROM vanguard.main.holdings_scan() WHERE fund_ticker IN ('VOO', 'BND') GROUP BY fund_ticker" },
+      ]),
       "vgi.result_columns_schema": resultColumnsSchema(holdingsSchema(), HOLDINGS_SCAN_DESCS),
     },
   });
@@ -386,6 +394,13 @@ export function makeFundDetailsFunction(get: VanguardGet) {
         "`products` carries (premium/discount, 52-week band, benchmark comparison, beta/R²). Percent " +
         "columns are in percent points; `beta` and `r_squared` are ratios.\n\n" +
         "It returns exactly one row; for the whole lineup use `products` (see the example queries).",
+      // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
+      // native duckdb_functions().examples carrier drops them) — VGI515.
+      "vgi.example_queries": JSON.stringify([
+        { description: "Key characteristics for VOO", sql: "SELECT ticker, primary_benchmark, beta, expense_ratio_percent FROM vanguard.main.fund_details('VOO')" },
+        { description: "Trading quality: premium/discount and 52-week band", sql: "SELECT ticker, premium_discount_percent, high_52w_price, low_52w_price FROM vanguard.main.fund_details('VOO')" },
+        { description: "1-year fund return vs its benchmark", sql: "SELECT return_1y_percent, benchmark_return_1y_percent FROM vanguard.main.fund_details('VOO')" },
+      ]),
       "vgi.result_columns_schema": resultColumnsSchema(fundDetailsSchema(), FUND_DETAILS_DESCS),
     },
   });
@@ -443,6 +458,7 @@ export function makeDistributionsFunction(get: VanguardGet) {
     examples: [
       { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8", description: "Recent VOO distributions" },
       { sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := DATE '2025-01-01')", description: "Total distributions since a start date" },
+      { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := DATE '2024-01-01', end_date := DATE '2024-12-31') ORDER BY record_date", description: "Distributions within a bounded record-date window" },
     ],
     tags: {
       "vgi.category": "history",
@@ -456,6 +472,13 @@ export function makeDistributionsFunction(get: VanguardGet) {
         "Recent distribution history, one row per distribution. Amounts are **per-share** dollars " +
         "(not percentages). Bound the record-date range with `start_date`/`end_date` (see the " +
         "example queries).",
+      // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
+      // native duckdb_functions().examples carrier drops them) — VGI515.
+      "vgi.example_queries": JSON.stringify([
+        { description: "Recent VOO distributions", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8" },
+        { description: "Total distributions since a start date", sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := DATE '2025-01-01')" },
+        { description: "Distributions within a bounded record-date window", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := DATE '2024-01-01', end_date := DATE '2024-12-31') ORDER BY record_date" },
+      ]),
       "vgi.result_columns_schema": resultColumnsSchema(distributionsSchema(), DISTRIBUTIONS_DESCS),
     },
   });
@@ -518,6 +541,12 @@ export function makeNavHistoryFunction(get: VanguardGet) {
         "NAV and market-price history over a look-back window. Pick the window with `period` " +
         "(`1M`/`1Y`/`5Y`/`10Y`, default `1Y`); longer windows return coarser points (5Y weekly, " +
         "10Y monthly). This is **fund NAV**, not an intraday candle series (see the example queries).",
+      // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
+      // native duckdb_functions().examples carrier drops them) — VGI515.
+      "vgi.example_queries": JSON.stringify([
+        { description: "Daily VOO NAV over the past year", sql: "SELECT as_of_date, nav FROM vanguard.main.nav_history('VOO', period := '1Y') ORDER BY as_of_date DESC" },
+        { description: "10-year NAV vs market-price series (monthly points)", sql: "SELECT as_of_date, nav, market_price FROM vanguard.main.nav_history('VOO', period := '10Y') ORDER BY as_of_date" },
+      ]),
       "vgi.result_columns_schema": resultColumnsSchema(navHistorySchema(), NAV_HISTORY_DESCS),
     },
   });
