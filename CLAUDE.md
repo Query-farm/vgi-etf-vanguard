@@ -107,7 +107,12 @@ All keyless JSON, all need only the browser User-Agent:
    - `risk` → `{code, level, volatility:{primaryBenchmarkName, betaPrimary, rSquaredPrimary, …}}`.
    - `distribution` → `{divCapGain:{distributionFrequency, item:[{type, perShareAmount ("$1.96"),
      recordDate, reinvestmentDate, payableDate, reinvestPrice}]}}` (recent history; no ex-date —
-     Vanguard keys on the record date).
+     Vanguard keys on the record date). **Rolling window, ~18 months** — measured 2025-02→2026-07:
+     6 items for a quarterly payer (VOO/VTI/VYM/VIG), 18 for a monthly one (BND). NOT "the last
+     few years". So any `start_date`/`end_date` in a doc example, test, or agent task must be
+     derived from `CURRENT_DATE`, never a hard-coded calendar year — a fixed year silently rots
+     into an empty result once the window moves past it (this is what made
+     `distributions` example #2 return no rows and held the worker at vgi-lint L1).
    - `portfolio-holding/{stock,bond}?start=1&count=50000` → `{size, asOfDate, fund:{entity:[…]}}`;
      each holding `{longName, shortName, sharesHeld, marketValue, ticker, isin, cusip, sedol,
      percentWeight, notionalValue, secMainType, secSubType}` plus, for bonds, `{couponRate,

@@ -188,14 +188,16 @@ FROM vanguard.distributions('VOO')
 ORDER BY record_date DESC
 LIMIT 8;
 
--- Total distributions since a start date:
+-- Total distributions over the trailing year:
 SELECT sum(per_share_amount) AS total
-FROM vanguard.distributions('VOO', start_date := DATE '2025-01-01');
+FROM vanguard.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE);
 ```
 
 Amounts are **per-share dollars**, not percentages. `start_date`/`end_date` bound the record-date
-range (inclusive SQL `DATE`s; omit for unbounded). Vanguard publishes recent history (typically
-the last few years).
+range (inclusive SQL `DATE`s; omit for unbounded). Vanguard publishes only a **rolling** window of
+about the trailing 18 months (~6 payouts for a quarterly payer, ~18 for a monthly one), so derive
+your bounds from `CURRENT_DATE` — a hard-coded calendar year returns no rows once the window moves
+past it.
 
 ### nav_history — NAV & market-price series
 

@@ -455,10 +455,14 @@ export function makeDistributionsFunction(get: VanguardGet) {
       out.emit(distributionsBatch(schema, rows));
       state.done = true;
     },
+    // The source publishes a ROLLING window (~18 months), so a hard-coded calendar
+    // year rots into an empty result as the window advances — derive the bounds from
+    // CURRENT_DATE instead so these keep demonstrating real rows. `DATE - INTERVAL`
+    // yields a TIMESTAMP in DuckDB, hence the explicit ::DATE for the DATE argument.
     examples: [
       { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8", description: "Recent VOO distributions" },
-      { sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := DATE '2025-01-01')", description: "Total distributions since a start date" },
-      { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := DATE '2024-01-01', end_date := DATE '2024-12-31') ORDER BY record_date", description: "Distributions within a bounded record-date window" },
+      { sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE)", description: "Total distributions over the trailing year" },
+      { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE) ORDER BY record_date", description: "Distributions within a bounded record-day window" },
     ],
     tags: {
       "vgi.category": "history",
@@ -466,18 +470,22 @@ export function makeDistributionsFunction(get: VanguardGet) {
         "Distribution (dividend / capital-gain) history for a fund: record / reinvestment / " +
         "payable dates, the distribution type, the per-share amount, and the reinvestment price. " +
         "Amounts are per-share dollars, not percents. Bound the record-date range with " +
-        "start_date/end_date. Vanguard publishes recent history (typically the last few years).",
+        "start_date/end_date. Vanguard publishes only a rolling recent window — about the " +
+        "trailing 18 months (roughly 6 payouts for a quarterly payer, 18 for a monthly one) — " +
+        "so bounds outside it return no rows; derive them from CURRENT_DATE rather than " +
+        "hard-coding a calendar year.",
       "vgi.doc_md":
         "## distributions\n\n" +
         "Recent distribution history, one row per distribution. Amounts are **per-share** dollars " +
         "(not percentages). Bound the record-date range with `start_date`/`end_date` (see the " +
-        "example queries).",
+        "example queries). Vanguard publishes only a rolling window of about the trailing 18 " +
+        "months, so bounds outside it return no rows.",
       // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
       // native duckdb_functions().examples carrier drops them) — VGI515.
       "vgi.example_queries": JSON.stringify([
         { description: "Recent VOO distributions", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8" },
-        { description: "Total distributions since a start date", sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := DATE '2025-01-01')" },
-        { description: "Distributions within a bounded record-date window", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := DATE '2024-01-01', end_date := DATE '2024-12-31') ORDER BY record_date" },
+        { description: "Total distributions over the trailing year", sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE)" },
+        { description: "Distributions within a bounded record-day window", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE) ORDER BY record_date" },
       ]),
       "vgi.result_columns_schema": resultColumnsSchema(distributionsSchema(), DISTRIBUTIONS_DESCS),
     },

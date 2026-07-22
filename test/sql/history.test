@@ -4,6 +4,11 @@
 
 require-env VGI_TEST_WORKER
 
+# CURRENT_DATE lives in icu, and the bare unittest binary does not autoload it (the
+# DuckDB CLI and client libraries bundle icu, so the doc examples need no LOAD).
+statement ok
+LOAD icu;
+
 statement ok
 ATTACH 'vanguard' AS vg (TYPE vgi, LOCATION '${VGI_TEST_WORKER}');
 
@@ -55,5 +60,14 @@ SELECT * FROM vg.distributions('VOO', start_date := 'Jan 2026');
 # VOO has a distribution history with non-negative per-share amounts.
 query I
 SELECT (count(*) > 0 AND min(per_share_amount) >= 0)::INT FROM vg.distributions('VOO');
+----
+1
+
+# A bounded record-day window inside the published rolling window (~18 months) returns
+# rows, and only rows inside it. Guards the class of bug that made the doc example
+# empty: the source publishes a ROLLING window, so bounds must be derived from
+# CURRENT_DATE — a hard-coded calendar year silently rots into an empty result.
+query I
+SELECT (count(*) > 0 AND min(record_date) >= (CURRENT_DATE - INTERVAL 1 YEAR)::DATE AND max(record_date) <= (CURRENT_DATE - INTERVAL 3 MONTH)::DATE)::INT FROM vg.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE);
 ----
 1
