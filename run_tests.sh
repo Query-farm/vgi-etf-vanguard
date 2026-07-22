@@ -6,6 +6,7 @@
 # Prerequisites (one-time):
 #   uv tool install haybarn-unittest                      # the DuckDB unittest binary
 #   echo "INSTALL vgi FROM community;" | uvx haybarn-cli  # install the vgi extension
+#   echo "INSTALL icu;" | uvx haybarn-cli                 # CURRENT_DATE (history.test)
 #   bun install                                           # the worker's deps
 set -euo pipefail
 
@@ -24,6 +25,14 @@ if ! echo "LOAD vgi;" | uvx haybarn-cli >/dev/null 2>&1; then
     echo "==> Installing vgi extension from community repository"
     echo "INSTALL vgi FROM community;" | uvx haybarn-cli
 fi
+
+# history.test needs CURRENT_DATE, which lives in icu. The unittest binary neither bundles
+# nor autoloads it (the DuckDB CLI and client libraries do, so the worker's own doc examples
+# need no LOAD), so install it into the shared extension dir for `LOAD icu;` to resolve.
+# INSTALL is a no-op when the extension is already present, so this is safe to run always —
+# don't guard it on `LOAD icu` through haybarn-cli, which autoloads and would report success
+# even with nothing installed for the unittest binary to find.
+echo "INSTALL icu;" | uvx haybarn-cli >/dev/null
 
 # NOTE: the last arg is a Catch2 test-name filter, not a shell glob. Catch2 only honors a
 # trailing `*` wildcard, so use `test/sql/*` (not `test/sql/*.test`).
