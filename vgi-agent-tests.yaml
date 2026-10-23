@@ -1,0 +1,43 @@
+# Private grader sidecar for `vgi-lint simulate` (and `lint`'s VGI520 coverage). The worker
+# publishes only task names + prompts in `vgi.agent_test_tasks` (src/catalog.ts); these
+# grader fields are keyed by that name and never sent to the analyst agent.
+#
+# Each task carries a deterministic check_sql that asserts specific ground truth;
+# reference_sql is omitted (live data + free-form analyst queries won't reproduce an exact
+# result set). success_criteria records what a correct answer looks like for the LLM judge.
+tasks:
+  - name: voo_exists
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.products WHERE ticker = 'VOO'
+    success_criteria: >-
+      The answer confirms VOO is the Vanguard S&P 500 ETF, found via the products table.
+  - name: voo_top_holding
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.holdings WHERE fund_ticker = 'VOO'
+    success_criteria: >-
+      The answer names VOO's top holding by weight, obtained from the holdings table.
+  - name: voo_holdings_scan
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.holdings_scan() WHERE fund_ticker = 'VOO'
+    success_criteria: >-
+      The answer returns VOO constituents via holdings_scan() filtered by ticker.
+  - name: voo_expense_ratio
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.products WHERE ticker = 'VOO' AND expense_ratio_percent IS NOT NULL
+    success_criteria: >-
+      The answer reports VOO's expense ratio (a small percentage) from the products table.
+  - name: voo_benchmark
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.fund_details('VOO') WHERE primary_benchmark IS NOT NULL
+    success_criteria: >-
+      The answer names VOO's primary benchmark (the S&P 500) from the fund_details function.
+  - name: voo_nav_history
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.nav_history('VOO', period := '1Y') WHERE nav > 0
+    success_criteria: >-
+      The answer summarizes VOO's NAV over the past year, obtained from the nav_history function.
+  - name: voo_last_distribution
+    check_sql: >-
+      SELECT count(*) > 0 FROM vanguard.main.distributions('VOO')
+    success_criteria: >-
+      The answer gives VOO's most recent distribution (record date and per-share amount) from the distributions function.

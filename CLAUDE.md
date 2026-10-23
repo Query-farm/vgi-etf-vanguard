@@ -177,7 +177,7 @@ Typecheck must be a `bash scripts/typecheck.sh` file (not an inline package.json
   the linter reads as the DATE type); numeric column comments should state a unit/definition
   (VGI131); an argument that enumerates allowed values needs `argConstraints.choices` (VGI317);
   every function needs an agent test task (VGI520 — all are covered in `catalog.ts`
-  `vgi.agent_test_tasks`).
+  `vgi.agent_test_tasks`; their graders live in `vgi-agent-tests.yaml`, VGI416).
 - Don't add a secret type; this worker is keyless by design.
 - Don't add time travel to `holdings` — Vanguard has no historical as-of. This is the deliberate
   structural difference from vgi-etf-ishares.

@@ -186,52 +186,37 @@ const CATALOG_TAGS: Record<string, string> = {
       sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 5",
     },
   ]),
-  // Agent-suitability suite (catalog only). Each task carries a deterministic check_sql that
-  // asserts specific ground truth; reference_sql is omitted (live data + free-form analyst
-  // queries won't reproduce an exact result set). success_criteria records what a correct answer
-  // looks like for the LLM judge.
+  // Agent-suitability suite (catalog only). Only each task's name + prompt is published
+  // here (VGI416); the grader fields live in the private sidecar vgi-agent-tests.yaml,
+  // keyed by task name, and are never shown to the analyst.
   "vgi.agent_test_tasks": JSON.stringify([
     {
       name: "voo_exists",
       prompt: "Does Vanguard offer an ETF with the ticker VOO, and what is it called?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.products WHERE ticker = 'VOO'",
-      success_criteria: "The answer confirms VOO is the Vanguard S&P 500 ETF, found via the products table.",
     },
     {
       name: "voo_top_holding",
       prompt: "What is the single largest holding of the Vanguard S&P 500 ETF (VOO) right now?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.holdings WHERE fund_ticker = 'VOO'",
-      success_criteria: "The answer names VOO's top holding by weight, obtained from the holdings table.",
     },
     {
       name: "voo_holdings_scan",
       prompt: "Using the holdings backing scan, list a few VOO constituents by weight.",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.holdings_scan() WHERE fund_ticker = 'VOO'",
-      success_criteria: "The answer returns VOO constituents via holdings_scan() filtered by ticker.",
     },
     {
       name: "voo_expense_ratio",
       prompt: "What is the expense ratio of the Vanguard S&P 500 ETF (VOO)?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.products WHERE ticker = 'VOO' AND expense_ratio_percent IS NOT NULL",
-      success_criteria: "The answer reports VOO's expense ratio (a small percentage) from the products table.",
     },
     {
       name: "voo_benchmark",
       prompt: "Which benchmark does the Vanguard S&P 500 ETF (VOO) track, and what is its beta to it?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.fund_details('VOO') WHERE primary_benchmark IS NOT NULL",
-      success_criteria: "The answer names VOO's primary benchmark (the S&P 500) from the fund_details function.",
     },
     {
       name: "voo_nav_history",
       prompt: "What has the Vanguard S&P 500 ETF's (VOO) NAV done over the past year?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.nav_history('VOO', period := '1Y') WHERE nav > 0",
-      success_criteria: "The answer summarizes VOO's NAV over the past year, obtained from the nav_history function.",
     },
     {
       name: "voo_last_distribution",
       prompt: "When did the Vanguard S&P 500 ETF (VOO) most recently pay a distribution, and how much?",
-      check_sql: "SELECT count(*) > 0 FROM vanguard.main.distributions('VOO')",
-      success_criteria: "The answer gives VOO's most recent distribution (record date and per-share amount) from the distributions function.",
     },
   ]),
 };
