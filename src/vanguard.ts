@@ -8,9 +8,8 @@
 //
 //   /investment-products/list/funddetail/all           → products  (one big catalog object with
 //     an entity per fund: profile, price, yield, returns, risk)
-//   /investment-products/etfs/profile/api/<T>/<comp>    → holdings, fund_details, distributions
-//     (per-fund components: profile, price, portfolio-holding/{stock,bond}, distribution,
-//      performance, risk)
+//   /irr/funds/profile/<T>.json                         → fund_details, distributions
+//   /irr/funds/profile/<T>-AdditionalFundData           → holdings (every holding group)
 //   /vmf/api/<T>/price-history/<period>                 → nav_history (daily/weekly/monthly NAV
 //      + market-price series over a fixed period window)
 //
@@ -20,7 +19,7 @@
 //
 // Vanguard values arrive as JSON strings far more often than numbers ("0.0300", "$1.96",
 // "570.22", "-0.15"); `num()` strips the `$`/`,`/`%` decoration and parses. Dates arrive as ISO
-// timestamps with an offset ("2026-05-31T00:00:00-04:00"); `isoDate()` keeps only the calendar
+// timestamps with an offset ("2026-05-31T00:00:00-04:00") or US "MM/DD/YYYY"; `isoDate()` keeps only the calendar
 // day (the leading YYYY-MM-DD) as epoch SECONDS at UTC midnight — the driver returns dates as
 // epoch seconds and the Arrow DATE mapping lives in schema.ts (keeping this module type/SDK-free).
 //
@@ -59,18 +58,21 @@ export function num(v: unknown): number | null {
 }
 
 /**
- * A Vanguard ISO date ("2026-05-31T00:00:00-04:00" or "2026-05-31") → epoch SECONDS at UTC
- * midnight of the CALENDAR day. We keep only the leading YYYY-MM-DD so the zone offset can never
+ * A Vanguard date → epoch SECONDS at UTC midnight of the CALENDAR day. Accepts ISO
+ * ("2026-05-31T00:00:00-04:00" / "2026-05-31", the catalog + price-history planes) and US
+ * "MM/DD/YYYY" (the per-fund irr/funds/profile plane). We keep only the leading YYYY-MM-DD so the zone offset can never
  * shift the reported day. Null when absent / unparseable. Validates the parts round-trip, so an
  * impossible date returns null.
  */
 export function isoDate(v: unknown): number | null {
   if (isBlank(v)) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v).trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
+  const s = String(v).trim();
+  let y: number, mo: number, d: number;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  const us = iso ? null : /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+  if (iso) [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  else if (us) [y, mo, d] = [Number(us[3]), Number(us[1]), Number(us[2])];
+  else return null;
   const ms = Date.UTC(y, mo - 1, d);
   if (Number.isNaN(ms)) return null;
   const dt = new Date(ms);
@@ -138,7 +140,7 @@ export interface ProductRow {
   riskCode: number | null;
   primaryBenchmark: string | null;
   productPageUrl: string | null;
-  /** Internal only (not an emitted column): whether this is a bond fund (picks the holdings endpoint). */
+  /** Internal only (not an emitted column): whether this is a bond fund (`fundFact.isBond`). */
   isBond: boolean;
 }
 
@@ -264,18 +266,32 @@ export async function resolveFund(
   return hit ? (hit.ticker as string).toUpperCase() : null;
 }
 
-// ── per-fund component plumbing ─────────────────────────────────────────────────
+// ── per-fund data plumbing ────────────────────────────────────────────────────
+//
+// Vanguard retired the per-component `/investment-products/etfs/profile/api/<T>/<component>`
+// plane (every component 404s since 2026-10). The fund page now reads two whole-fund JSON
+// documents from the `irr/funds/profile/` plane (the `data-funds-api-endpoint` the page's web
+// components are configured with):
+//
+//   <T>.json                 → dashboard / overview / price / performancefees / distributions /
+//                              portfolioComposition / fundFlags / content  (fund_details,
+//                              distributions)
+//   <T>-AdditionalFundData   → holdingDetails.{equity,fixedIncome,shortTermReserves,derivative,
+//                              commodity,currency}Holdings + historicalPrice  (holdings)
+//
+// Dates on this plane are US "MM/DD/YYYY" strings (isoDate accepts both forms).
 
-/** Build a per-fund profile-API component URL (profile, price, distribution, performance, risk). */
-export function componentUrl(ticker: string, component: string): string {
-  return `${VANGUARD_HOST}/investment-products/etfs/profile/api/${encodeURIComponent(
-    ticker.toUpperCase(),
-  )}/${component}`;
+/** Base of the per-fund JSON plane. */
+export const FUND_DATA_BASE = `${VANGUARD_HOST}/irr/funds/profile`;
+
+/** The whole-fund JSON document (overview, price, performance, risk, distributions). */
+export function fundDataUrl(ticker: string): string {
+  return `${FUND_DATA_BASE}/${encodeURIComponent(ticker.toUpperCase())}.json`;
 }
 
-/** Build a portfolio-holding URL for the stock or bond breakdown, asking for every lot in one page. */
-export function holdingsUrl(ticker: string, kind: "stock" | "bond"): string {
-  return `${componentUrl(ticker, `portfolio-holding/${kind}`)}?start=1&count=50000`;
+/** The additional-fund-data document (full holdings + historical NAV). */
+export function holdingsUrl(ticker: string): string {
+  return `${FUND_DATA_BASE}/${encodeURIComponent(ticker.toUpperCase())}-AdditionalFundData`;
 }
 
 /** Build a price-history URL for a period window (1M / 1Y / 5Y / 10Y). */
@@ -283,13 +299,25 @@ export function priceHistoryUrl(ticker: string, period: string): string {
   return `${VANGUARD_HOST}/vmf/api/${encodeURIComponent(ticker.toUpperCase())}/price-history/${period}`;
 }
 
-/** Reach the `fund.entity` array of a portfolio-holding envelope, or []. */
-function entityArray(json: unknown): unknown[] {
-  const e = (json as { fund?: { entity?: unknown } } | null | undefined)?.fund?.entity;
-  return Array.isArray(e) ? e : [];
+/** A nested object at `key`, or {} — never throws on a missing/odd container. */
+function obj(v: unknown, key: string): Record<string, unknown> {
+  if (v == null || typeof v !== "object") return {};
+  const inner = (v as Record<string, unknown>)[key];
+  return inner != null && typeof inner === "object" && !Array.isArray(inner)
+    ? (inner as Record<string, unknown>)
+    : {};
 }
 
-// ── holdings (portfolio-holding/{stock,bond}) ───────────────────────────────────
+/** Normalize asset class from the fund JSON's `fundFlags`, else the display asset class. */
+function assetClassOfFlags(flags: Record<string, unknown>, fallback: unknown): string | null {
+  if (flags.isStock) return "Equity";
+  if (flags.isBond) return "Fixed Income";
+  if (flags.isBalanced) return "Balanced";
+  if (flags.isMoneyMarket) return "Money Market";
+  return str(fallback);
+}
+
+// ── holdings (AdditionalFundData → holdingDetails) ──────────────────────────────
 
 export interface HoldingRow {
   /** The fund's ticker — the partition key (constant per fund; distinct from the constituent `ticker`). */
@@ -305,64 +333,77 @@ export interface HoldingRow {
   sharesHeld: number | null;
   notionalValue: number | null;
   secType: string | null;
-  // Fixed-income-only fields (null for equity funds).
+  // Fixed-income / cash fields (null for equity and derivative positions).
   couponPercent: number | null;
   maturity: string | null;
   faceAmount: number | null;
 }
 
-/** Map a portfolio-holding envelope to holding rows, sorted by weight desc (NULLS last). */
+/** The holdingDetails arrays, in the order the fund page lists them. */
+const HOLDING_GROUPS = [
+  "equityHoldings",
+  "fixedIncomeHoldings",
+  "shortTermReservesHoldings",
+  "derivativeHoldings",
+  "commodityHoldings",
+  "currencyHoldings",
+] as const;
+
+/** Main types whose coupon / maturity / face are meaningful (fixed income, money market/cash). */
+const DEBT_MAIN_TYPES = new Set(["FI", "MM"]);
+
+/**
+ * Map an AdditionalFundData envelope's `holdingDetails` to holding rows, sorted by weight desc
+ * (NULLS last). Every holding group (equity, fixed income, short-term reserves, derivatives,
+ * commodity, currency) is included; `sec_type` carries Vanguard's `securityType` (e.g.
+ * "EQ.STOCK", "FI.US_GOV", "MM.CASH", "DE.IND") so callers can filter.
+ */
 export function parseHoldings(json: unknown, fundTicker: string | null = null): HoldingRow[] {
+  const details = obj(json, "holdingDetails");
+  const asOfDate = isoDate(details.asOfDate);
   const rows: HoldingRow[] = [];
-  for (const raw of entityArray(json)) {
-    if (raw == null || typeof raw !== "object") continue;
-    const h = raw as Record<string, unknown>;
-    const secType = [str(h.secMainType), str(h.secSubType)].filter((s) => s).join(" / ") || null;
-    rows.push({
-      fundTicker,
-      asOfDate: isoDate(h.asOfDate),
-      name: str(h.longName) ?? str(h.shortName),
-      ticker: str(h.ticker),
-      isin: str(h.isin),
-      cusip: str(h.cusip),
-      sedol: str(h.sedol),
-      weightPercent: num(h.percentWeight),
-      marketValue: num(h.marketValue),
-      sharesHeld: num(h.sharesHeld),
-      notionalValue: num(h.notionalValue),
-      secType,
-      couponPercent: num(h.couponRate),
-      maturity: str(h.maturityDate),
-      faceAmount: num(h.faceAmount),
-    });
+  for (const group of HOLDING_GROUPS) {
+    const list = details[group];
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) {
+      if (raw == null || typeof raw !== "object") continue;
+      const h = raw as Record<string, unknown>;
+      const mainType = str(h.securityMainType);
+      const debt = mainType != null && DEBT_MAIN_TYPES.has(mainType);
+      rows.push({
+        fundTicker,
+        asOfDate,
+        name: str(h.securityLongDescription) ?? str(h.securityShortDescription),
+        ticker: str(h.ticker),
+        isin: str(h.isin),
+        cusip: str(h.cusip),
+        sedol: str(h.sedol),
+        weightPercent: num(h.marketValuePercentage),
+        marketValue: num(h.marketValueBaseCurrency),
+        sharesHeld: num(h.shareQuantity),
+        notionalValue: num(h.notionalValue),
+        secType: str(h.securityType) ?? mainType,
+        couponPercent: debt ? num(h.couponRate) : null,
+        maturity: debt ? str(h.maturityDate) : null,
+        faceAmount: debt ? num(h.faceAmount) : null,
+      });
+    }
   }
-  // Vanguard returns holdings weight-descending; enforce it so `... LIMIT 10` is the top
-  // holdings without an explicit ORDER BY. NULL weights sort last.
+  // Enforce weight-descending so `... LIMIT 10` is the top holdings without an explicit
+  // ORDER BY. NULL weights sort last. (Array.prototype.sort is stable.)
   rows.sort((a, b) => (b.weightPercent ?? -Infinity) - (a.weightPercent ?? -Infinity));
   return rows;
 }
 
-/**
- * Detailed current holdings for one fund. A bond fund's constituents live under the `bond`
- * breakdown, an equity fund's under `stock`; `isBond` (from the catalog) picks the primary
- * endpoint, and if it comes back empty we fall back to the other so a balanced/misclassified
- * fund still resolves. Returns the aggregated positions Vanguard publishes (one as-of date).
- */
+/** Detailed current holdings for one fund (one request; Vanguard reports one as-of date). */
 export async function fetchHoldings(
   get: (url: string) => Promise<unknown>,
   fundTicker: string,
-  isBond = false,
 ): Promise<HoldingRow[]> {
-  const primary: "stock" | "bond" = isBond ? "bond" : "stock";
-  const other: "stock" | "bond" = isBond ? "stock" : "bond";
-  let rows = parseHoldings(await get(holdingsUrl(fundTicker, primary)), fundTicker.toUpperCase());
-  if (rows.length === 0) {
-    rows = parseHoldings(await get(holdingsUrl(fundTicker, other)), fundTicker.toUpperCase());
-  }
-  return rows;
+  return parseHoldings(await get(holdingsUrl(fundTicker)), fundTicker.toUpperCase());
 }
 
-// ── fund_details (profile + price + performance + risk, merged to one row) ───────
+// ── fund_details (the whole-fund JSON, flattened to one row) ──────────────────────
 
 export interface FundDetailsRow {
   ticker: string | null;
@@ -397,67 +438,56 @@ export interface FundDetailsRow {
 }
 
 /**
- * Merge the profile / price / performance / risk envelopes into one fund-details row. Everything
- * is optional and degrades to nulls; `profile` supplies the identity/expense/inception, `price`
- * the quote/premium/52-week band, `performance` the annualized returns + benchmark, and `risk`
- * the level/beta/R².
+ * Flatten the whole-fund JSON into one fund-details row. Everything is optional and degrades to
+ * nulls: `dashboard`/`overview` supply identity, expense, inception and NAV/market price;
+ * `price` the premium/discount, SEC yield and 52-week band; `performancefees` the month-end
+ * annualized returns, benchmark and volatility (beta / R²); `content.levelDesc` the risk level.
  */
-export function parseFundDetails(
-  profile: unknown,
-  price: unknown,
-  performance: unknown,
-  risk: unknown,
-): FundDetailsRow {
-  const p = ((profile as { fundProfile?: unknown } | null | undefined)?.fundProfile ??
-    {}) as Record<string, unknown>;
-  const current = ((price as { currentPrice?: unknown } | null | undefined)?.currentPrice ??
-    {}) as Record<string, unknown>;
-  const daily = (current.dailyPrice as Record<string, unknown> | undefined) ?? {};
-  const regular = (daily.regular as Record<string, unknown> | undefined) ?? {};
-  const market = (daily.market as Record<string, unknown> | undefined) ?? {};
-  const yld = (current.yield as Record<string, unknown> | undefined) ?? {};
-  const highLowReg =
-    (((current.highLow as Record<string, unknown> | undefined) ?? {}).regular as
-      | Record<string, unknown>
-      | undefined) ?? {};
-  const recent =
-    ((performance as { recentInvestmentRtn?: unknown } | null | undefined)?.recentInvestmentRtn ??
-      {}) as Record<string, unknown>;
-  const fundReturn = (recent.fundReturn as Record<string, unknown> | undefined) ?? {};
-  const benchReturn = (recent.benchmarkReturn as Record<string, unknown> | undefined) ?? {};
-  const r = (risk as Record<string, unknown> | null | undefined) ?? {};
-  const vol = (r.volatility as Record<string, unknown> | undefined) ?? {};
-  const ticker = str(p.ticker);
+export function parseFundDetails(json: unknown): FundDetailsRow {
+  const dash = obj(json, "dashboard");
+  const ov = obj(json, "overview");
+  const price = obj(json, "price");
+  const flags = obj(json, "fundFlags");
+  const content = obj(json, "content");
+  const perf = obj(json, "performancefees");
+  const monthEnd = obj(obj(obj(perf, "totalReturns"), "summary"), "monthEnd");
+  const fundReturn = obj(monthEnd, "fundReturn");
+  const benchReturn = obj(monthEnd, "benchmarkReturn");
+  const volList = obj(perf, "historicalVolatilityMeasure").volatilityMeasure;
+  const vol =
+    Array.isArray(volList) && volList[0] != null && typeof volList[0] === "object"
+      ? (volList[0] as Record<string, unknown>)
+      : {};
   return {
-    ticker,
-    fundId: str(p.fundId),
-    cusip: str(p.cusip),
-    longName: str(p.longName),
-    shortName: str(p.shortName),
-    assetClass: assetClassOf(p),
-    category: str(p.category),
-    managementStyle: str(p.fundManagementStyle),
-    inceptionDate: isoDate(p.inceptionDate),
-    expenseRatioPercent: num(p.expenseRatio),
-    price: num(regular.price),
-    priceAsOf: isoDate(regular.asOfDate),
-    marketPrice: num(market.price),
-    premiumDiscountPercent: num(current.premiumOrDiscount),
-    yieldPercent: num(yld.yieldPct),
-    yieldAsOf: isoDate(yld.asOfDate),
-    high52wPrice: num(highLowReg.highPrice),
-    low52wPrice: num(highLowReg.lowPrice),
+    ticker: str(dash.ticker) ?? str(perf.ticker),
+    fundId: str(ov.fundId) ?? str(dash.fundId),
+    cusip: str(ov.cusip),
+    longName: str(dash.fundFullName),
+    shortName: str(monthEnd.fundShortName),
+    assetClass: assetClassOfFlags(flags, ov.assetClass ?? dash.assetClass),
+    category: str(ov.category) ?? str(dash.category),
+    managementStyle: str(ov.managementStyle) ?? str(dash.managementStyle),
+    inceptionDate: isoDate(ov.inceptionDate),
+    expenseRatioPercent: num(ov.expenseRatio ?? dash.expenseRatio),
+    price: num(price.navPrice ?? ov.navPrice),
+    priceAsOf: isoDate(price.navPriceAsOfDate ?? ov.navPriceAsOfDate),
+    marketPrice: num(price.marketPrice ?? ov.marketPrice),
+    premiumDiscountPercent: num(price.premiumDiscountPct),
+    yieldPercent: num(price.secYield ?? dash.secYield),
+    yieldAsOf: isoDate(price.secYieldAsOfDate ?? dash.secYieldAsOfDate),
+    high52wPrice: num(price["52WeekHigh"]),
+    low52wPrice: num(price["52WeekLow"]),
     ytdReturnPercent: num(fundReturn.calendarYTDPct),
     return1yPercent: num(fundReturn.oneYrPct),
     return3yPercent: num(fundReturn.threeYrPct),
     return5yPercent: num(fundReturn.fiveYrPct),
     return10yPercent: num(fundReturn.tenYrPct),
     returnSinceInceptionPercent: num(fundReturn.sinceInceptionPct),
-    primaryBenchmark: str(vol.primaryBenchmarkName) ?? str(recent.benchmarkShortName),
+    primaryBenchmark: str(vol.benchmarkShortName) ?? str(monthEnd.benchmarkShortName),
     benchmarkReturn1yPercent: num(benchReturn.oneYrPct),
-    beta: num(vol.betaPrimary),
-    rSquared: num(vol.rSquaredPrimary),
-    riskLevel: str(r.level),
+    beta: num(vol.beta),
+    rSquared: num(vol.rSquared ?? vol.rsquared),
+    riskLevel: str(content.levelDesc),
   };
 }
 
@@ -465,16 +495,10 @@ export async function fetchFundDetails(
   get: (url: string) => Promise<unknown>,
   fundTicker: string,
 ): Promise<FundDetailsRow> {
-  const [profile, price, performance, risk] = await Promise.all([
-    get(componentUrl(fundTicker, "profile")),
-    get(componentUrl(fundTicker, "price")),
-    get(componentUrl(fundTicker, "performance")),
-    get(componentUrl(fundTicker, "risk")),
-  ]);
-  return parseFundDetails(profile, price, performance, risk);
+  return parseFundDetails(await get(fundDataUrl(fundTicker)));
 }
 
-// ── distributions (component "distribution", container divCapGain.item) ──────────
+// ── distributions (whole-fund JSON → distributions.incomeCapitalGains) ───────────
 
 export interface DistributionRow {
   recordDate: number | null;
@@ -485,15 +509,13 @@ export interface DistributionRow {
   reinvestPrice: number | null;
 }
 
-/** Map a distribution envelope's divCapGain items, optionally bounded to [startSec, endSec] by record date. */
+/** Map the fund JSON's distribution items, optionally bounded to [startSec, endSec] by record date. */
 export function parseDistributions(
   json: unknown,
   startSec: number | null = null,
   endSec: number | null = null,
 ): DistributionRow[] {
-  const items = (
-    (json as { divCapGain?: { item?: unknown } } | null | undefined)?.divCapGain?.item
-  );
+  const items = obj(json, "distributions").incomeCapitalGains;
   if (!Array.isArray(items)) return [];
   const rows: DistributionRow[] = [];
   for (const raw of items) {
@@ -504,11 +526,11 @@ export function parseDistributions(
     if (endSec != null && (recordDate == null || recordDate > endSec)) continue;
     rows.push({
       recordDate,
-      reinvestmentDate: isoDate(it.reinvestmentDate),
+      reinvestmentDate: isoDate(it.reInvestDate),
       payableDate: isoDate(it.payableDate),
       distributionType: str(it.type),
-      perShareAmount: num(it.perShareAmount),
-      reinvestPrice: num(it.reinvestPrice),
+      perShareAmount: num(it.share),
+      reinvestPrice: num(it.reInvestPrice),
     });
   }
   return rows;
@@ -520,7 +542,7 @@ export async function fetchDistributions(
   startSec: number | null = null,
   endSec: number | null = null,
 ): Promise<DistributionRow[]> {
-  return parseDistributions(await get(componentUrl(fundTicker, "distribution")), startSec, endSec);
+  return parseDistributions(await get(fundDataUrl(fundTicker)), startSec, endSec);
 }
 
 // ── nav_history (vmf price-history, nav + marketPrice series over a period) ───────

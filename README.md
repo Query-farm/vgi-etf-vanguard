@@ -7,9 +7,9 @@ characteristics snapshot, and per-fund distribution and NAV/price history.
 | Object | What it returns | Vanguard source |
 | --- | --- | --- |
 | `vanguard.products` (table) | Every US ETF with key facts, one row per fund | `list/funddetail/all` catalog |
-| `vanguard.holdings` (table) | Detailed current holdings, partitioned by fund_ticker | `profile/api/<T>/portfolio-holding/{stock,bond}` |
-| `vanguard.fund_details(fund)` | Wide one-row characteristics snapshot | `profile` + `price` + `performance` + `risk` |
-| `vanguard.distributions(fund, start_date, end_date)` | Recent distribution (dividend) history | `profile/api/<T>/distribution` |
+| `vanguard.holdings` (table) | Detailed current holdings, partitioned by fund_ticker | `irr/funds/profile/<T>-AdditionalFundData` |
+| `vanguard.fund_details(fund)` | Wide one-row characteristics snapshot | `irr/funds/profile/<T>.json` |
+| `vanguard.distributions(fund, start_date, end_date)` | Recent distribution (dividend) history | `irr/funds/profile/<T>.json` |
 | `vanguard.nav_history(fund, period)` | NAV + market-price series over a look-back window | `vmf/api/<T>/price-history/<period>` |
 
 Everything rides Vanguard's public JSON planes — there is no secret to create and no login.
@@ -153,13 +153,13 @@ LIMIT 5;
 ```
 
 `fund_ticker` is the **fund's** ticker and the hive partition key — distinct from the `ticker`
-column (each row's own constituent ticker, empty for aggregated bond lots). Vanguard reports a
+column (each row's own constituent ticker, empty when Vanguard has none). Vanguard reports a
 single as-of date per fund (the `as_of_date` column); there is **no time travel**. Rows come back
 **weight-descending**. Join `holdings.fund_ticker` to `products.ticker` for fund-level facts.
 Columns: `fund_ticker`, `as_of_date` (DATE), `name`, `ticker`, `isin`, `cusip`, `sedol`,
-`weight_percent`, `market_value`, `shares_held`, `notional_value`, `sec_type`, plus the
-fixed-income-only `coupon_percent`, `maturity` (raw text; may be an aggregated range), and
-`face_amount`.
+`weight_percent`, `market_value`, `shares_held`, `notional_value`, `sec_type` (e.g. `EQ.STOCK`,
+`FI.US_GOV`, `MM.CASH`, `DE.IND` — every holding group is included, cash and futures too), plus
+the debt-only `coupon_percent`, `maturity` (raw MM/DD/YYYY text), and `face_amount`.
 
 > A backing `holdings_scan()` function is also exposed (it's what the table scans, and it's what
 > lets DuckDB push the `fund_ticker` filter) — prefer the `holdings` table.

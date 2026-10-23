@@ -31,7 +31,7 @@ scan streams every fund** (one partition per fund). Mechanics (mirror iShares' s
 - **Hive partitioning + streaming queue.** `holdingsScan` is a `partitionKind:
   "SINGLE_VALUE_PARTITIONS"` generator — `fund_ticker` is the partition key (annotated
   `vgi.partition_column` in `holdingsSchema`). `onInit` reads the pushed `fund_ticker` filter (or,
-  absent one, the whole ETF catalog), and `queuePush`es one item per fund (`{ticker, isBond}`) onto
+  absent one, the whole ETF catalog), and `queuePush`es one item per fund (`{ticker}`) onto
   a `BoundStorage` queue keyed by the execution id. `process()` pops one fund per tick, fetches its
   holdings, and `out.emit`s a single partition batch tagged with `vgi_partition_values`
   (min==max==ticker). `maxWorkers` workers drain the same queue → work-stealing fan-out. `LIMIT`
@@ -48,10 +48,11 @@ scan streams every fund** (one partition per fund). Mechanics (mirror iShares' s
   every row. Constraints: `products` advisory PK `[ticker]`, `holdings` `notNull [fund_ticker]`
   (advisory PKs are NOT enforced on scan). No cross-table FK (ticker/cusip/etc. recur with
   different meanings), and VGI807/809 are waived in `vgi-lint.toml` with reasons.
-- **Stock vs bond breakdown.** An equity fund's constituents live under `portfolio-holding/stock`,
-  a bond fund's under `portfolio-holding/bond`. `onInit` stamps each queue item with `isBond` (from
-  the catalog's `fundFact.isBond`) so `fetchHoldings` hits the right endpoint; if the primary comes
-  back empty it falls back to the other (handles balanced/misclassified funds).
+- **One holdings document per fund.** `<T>-AdditionalFundData` carries every holding group
+  (`equity`, `fixedIncome`, `shortTermReserves`, `derivative`, `commodity`, `currency`); the
+  parser concatenates them all and `sec_type` (`securityType`, e.g. `EQ.STOCK`, `MM.CASH`) lets
+  callers filter. Coupon/maturity/face are only kept for `FI`/`MM` main types (Vanguard sends a
+  meaningless face = share count and 0% coupon for equities).
 
 ## Architecture (keep this separation)
 
@@ -98,27 +99,30 @@ All keyless JSON, all need only the browser User-Agent:
    fiveYrPct,tenYrPct,sinceInceptionPct}` (newer funds omit the longer horizons → null). Backs
    `products` (filtered to `profile.isETF`) and the ticker resolution in `resolveFund`. 383 total
    entities, ~116 ETFs.
-2. **Per-fund profile API** — `GET /investment-products/etfs/profile/api/<TICKER>/<component>`:
-   - `profile` → `{fundProfile: {…}}` (same fields as the catalog's `profile`, one fund).
-   - `price` → `{currentPrice: {premiumOrDiscount, yield:{yieldPct,asOfDate},
-     dailyPrice:{regular,market}, highLow.regular:{highPrice,lowPrice}}, historicalPrice:{…}}`.
-   - `performance` → `{recentInvestmentRtn: {benchmarkShortName, fundReturn:{…annualized…},
-     benchmarkReturn:{oneYrPct,…}}}`.
-   - `risk` → `{code, level, volatility:{primaryBenchmarkName, betaPrimary, rSquaredPrimary, …}}`.
-   - `distribution` → `{divCapGain:{distributionFrequency, item:[{type, perShareAmount ("$1.96"),
-     recordDate, reinvestmentDate, payableDate, reinvestPrice}]}}` (recent history; no ex-date —
-     Vanguard keys on the record date). **Rolling window, ~18 months** — measured 2025-02→2026-07:
-     6 items for a quarterly payer (VOO/VTI/VYM/VIG), 18 for a monthly one (BND). NOT "the last
-     few years". So any `start_date`/`end_date` in a doc example, test, or agent task must be
-     derived from `CURRENT_DATE`, never a hard-coded calendar year — a fixed year silently rots
-     into an empty result once the window moves past it (this is what made
-     `distributions` example #2 return no rows and held the worker at vgi-lint L1).
-   - `portfolio-holding/{stock,bond}?start=1&count=50000` → `{size, asOfDate, fund:{entity:[…]}}`;
-     each holding `{longName, shortName, sharesHeld, marketValue, ticker, isin, cusip, sedol,
-     percentWeight, notionalValue, secMainType, secSubType}` plus, for bonds, `{couponRate,
-     maturityDate (may be an aggregated "MM/DD/YYYY-MM/DD/YYYY" range → kept as raw text),
-     faceAmount}`. Paginates at 500/page via a `next` link; we request a huge `count` to get every
-     lot in one call.
+2. **Per-fund JSON plane** — `GET /irr/funds/profile/<TICKER>.json` and
+   `GET /irr/funds/profile/<TICKER>-AdditionalFundData` (the `data-funds-api-endpoint` the fund
+   page's web components read). This REPLACED the old per-component
+   `/investment-products/etfs/profile/api/<T>/<component>` plane, which started 404ing in 2026-10.
+   Dates here are US `MM/DD/YYYY` strings and numbers carry `$`/`%`/`,` decoration.
+   - `<T>.json` → `{dashboard:{ticker, fundFullName, navPrice, marketPrice, secYield, …},
+     overview:{fundId, cusip, inceptionDate, category, managementStyle, expenseRatio, …},
+     price:{navPrice, navPriceAsOfDate, marketPrice, premiumDiscountPct, secYield,
+     52WeekHigh, 52WeekLow, historicalPrice.1m}, fundFlags:{isStock, isBond, …},
+     content:{levelDesc (risk level text), …}, performancefees:{totalReturns.summary.monthEnd
+     .{fundShortName, benchmarkShortName, fundReturn, benchmarkReturn},
+     historicalVolatilityMeasure.volatilityMeasure[{benchmarkShortName, beta, rSquared}]},
+     distributions:{distributionSchedule, incomeCapitalGains:[{type, share ("$1.82"),
+     recordDate, reInvestDate, payableDate, reInvestPrice}]}, portfolioComposition:{…}}`.
+     Backs `fund_details` and `distributions`. **Distributions are a rolling window** — 6 items
+     for a quarterly payer (~18 months). So any `start_date`/`end_date` in a doc example, test,
+     or agent task must be derived from `CURRENT_DATE`, never a hard-coded calendar year — a
+     fixed year silently rots into an empty result once the window moves past it.
+   - `<T>-AdditionalFundData` → `{historicalPrice, holdingDetails:{asOfDate, equityHoldings,
+     fixedIncomeHoldings, shortTermReservesHoldings, derivativeHoldings, …}, premiumDiscountDetails}`;
+     each holding `{securityType, securityMainType, securityLongDescription,
+     securityShortDescription, marketValuePercentage, ticker, isin, cusip, sedol, shareQuantity,
+     marketValueBaseCurrency, faceAmount, maturityDate, couponRate}`. Unpaginated (BND ≈ 9 MB,
+     16k lots). Backs `holdings`.
 3. **Price history** — `GET /vmf/api/<TICKER>/price-history/<PERIOD>` with PERIOD ∈ `1M/1Y/5Y/10Y`
    (`MAX`/`YTD`/`ALL` return empty). Shape: `{nav:[{item:[{asOfDate,price}]}],
    marketPrice:[{item:[…]}]}`. Backs `nav_history`, which zips nav+market by date. 1M/1Y are daily,

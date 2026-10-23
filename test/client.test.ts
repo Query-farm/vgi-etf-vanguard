@@ -4,7 +4,7 @@
 
 import { test, expect } from "bun:test";
 import { makeVanguardGet } from "../src/client.js";
-import { LIST_URL, componentUrl } from "../src/vanguard.js";
+import { LIST_URL, holdingsUrl } from "../src/vanguard.js";
 
 /** A fake fetch that counts calls and returns a canned JSON body. */
 function countingFetch(body: unknown = { ok: 1 }) {
@@ -16,7 +16,7 @@ function countingFetch(body: unknown = { ok: 1 }) {
   return { impl, calls };
 }
 
-const HOLDINGS_URL = componentUrl("VOO", "portfolio-holding/stock");
+const HOLDINGS_URL = holdingsUrl("VOO");
 
 test("catalog is fetched once then served from cache within the TTL", async () => {
   const { impl, calls } = countingFetch();

@@ -145,10 +145,9 @@ async function resolveOrThrow(fn: string, get: VanguardGet, fund: string): Promi
 // one SINGLE_VALUE partition. Multiple parallel workers drain the same execution-scoped queue, so
 // the fan-out is naturally work-stealing and bounded by maxWorkers.
 
-/** A queued fund: its ticker (the partition value) and whether it is a bond fund (endpoint pick). */
+/** A queued fund: its ticker (the partition value). */
 interface FundItem {
   ticker: string;
-  isBond: boolean;
 }
 const encodeFund = (item: FundItem): Uint8Array => new TextEncoder().encode(JSON.stringify(item));
 const decodeFund = (bytes: Uint8Array): FundItem => JSON.parse(new TextDecoder().decode(bytes));
@@ -277,7 +276,7 @@ export function makeHoldingsScan(get: VanguardGet) {
           .filter((r) => r.ticker)
           .map((r) => [
             String(r.ticker).toUpperCase(),
-            { ticker: String(r.ticker).toUpperCase(), isBond: r.isBond },
+            { ticker: String(r.ticker).toUpperCase() },
           ]),
       );
       const targets: FundItem[] =
@@ -298,7 +297,7 @@ export function makeHoldingsScan(get: VanguardGet) {
           return;
         }
         const fund = decodeFund(item);
-        const rows = await fetchHoldings(get, fund.ticker, fund.isBond);
+        const rows = await fetchHoldings(get, fund.ticker);
         if (rows.length === 0) continue;
         out.emit(holdingsBatch(schema, rows), partitionValues(fund.ticker));
         return;

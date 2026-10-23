@@ -92,11 +92,11 @@ const HOLDINGS_COLUMN_COMMENTS: Record<string, string> = {
   weight_percent: "Percent of the fund, 0–100 (7.89 = 7.89%; weights sum to ~100).",
   market_value: "Market value held, in USD.",
   shares_held: "Quantity held, as a count of shares or units.",
-  notional_value: "Notional value held, in USD.",
-  sec_type: "Security type classification, when Vanguard supplies it.",
-  coupon_percent: "Coupon rate, percent points (fixed income only).",
-  maturity: "Maturity (fixed income only; may be an aggregated range like a min–max span).",
-  face_amount: "Face/par amount held (fixed income only).",
+  notional_value: "Notional value held, in USD, when Vanguard supplies it (currently not published; null).",
+  sec_type: "Vanguard security type, MAIN.SUB (e.g. EQ.STOCK, FI.US_GOV, MM.CASH for short-term reserves, DE.IND for index futures).",
+  coupon_percent: "Coupon rate, percent points (fixed income and cash/money-market positions only).",
+  maturity: "Maturity date as Vanguard prints it, MM/DD/YYYY text (fixed income and cash/money-market positions only).",
+  face_amount: "Face/par amount held (fixed income and cash/money-market positions only).",
 };
 
 /** Table-level metadata for the holdings base table (fund-partitioned, current-only). */

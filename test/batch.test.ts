@@ -26,11 +26,7 @@ import {
 import {
   catalogEnvelope,
   stockHoldingsEnvelope,
-  profileEnvelope,
-  priceEnvelope,
-  performanceEnvelope,
-  riskEnvelope,
-  distributionEnvelope,
+  fundDataEnvelope,
   priceHistoryEnvelope,
 } from "./fake-vanguard.js";
 
@@ -57,9 +53,9 @@ test("holdings schema field names + order", () => {
 
 test("batch builders produce one row per parsed record", () => {
   expect((productsBatch(productsSchema(), parseProducts(catalogEnvelope())) as { numRows: number }).numRows).toBe(2);
-  expect((holdingsBatch(holdingsSchema(), parseHoldings(stockHoldingsEnvelope(), "VOO")) as { numRows: number }).numRows).toBe(2);
-  expect((fundDetailsBatch(fundDetailsSchema(), [parseFundDetails(profileEnvelope(), priceEnvelope(), performanceEnvelope(), riskEnvelope())]) as { numRows: number }).numRows).toBe(1);
-  expect((distributionsBatch(distributionsSchema(), parseDistributions(distributionEnvelope())) as { numRows: number }).numRows).toBe(2);
+  expect((holdingsBatch(holdingsSchema(), parseHoldings(stockHoldingsEnvelope(), "VOO")) as { numRows: number }).numRows).toBe(4);
+  expect((fundDetailsBatch(fundDetailsSchema(), [parseFundDetails(fundDataEnvelope())]) as { numRows: number }).numRows).toBe(1);
+  expect((distributionsBatch(distributionsSchema(), parseDistributions(fundDataEnvelope())) as { numRows: number }).numRows).toBe(2);
   expect((navHistoryBatch(navHistorySchema(), parseNavHistory(priceHistoryEnvelope("1Y"))) as { numRows: number }).numRows).toBe(2);
 });
 

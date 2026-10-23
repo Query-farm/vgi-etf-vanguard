@@ -1,9 +1,8 @@
 // A tiny in-process fake of the Vanguard endpoints — enough to prove the driver: it records
 // every requested URL (so a test can assert the wire contract) and returns canned envelopes
-// shaped like the real funddetail/all catalog JSON and the per-fund component JSON. No network.
+// shaped like the real funddetail/all catalog JSON and the per-fund irr/funds/profile JSON. No network.
 // Matches the driver's injected `get(url) => Promise<unknown>` signature. The fixtures mirror the
-// real response shapes observed live (profile / price / portfolio-holding / distribution /
-// performance / risk / price-history).
+// real response shapes observed live (<T>.json / <T>-AdditionalFundData / price-history).
 
 export class FakeVanguard {
   /** Every URL this fake was asked for, in order. */
@@ -16,16 +15,11 @@ export class FakeVanguard {
     return this.responder(url);
   };
 
-  /** Route by URL: the catalog vs each per-fund component. */
+  /** Route by URL: the catalog, the per-fund JSON documents, and price history. */
   static router(routes: {
     catalog?: unknown;
-    profile?: unknown;
-    price?: unknown;
-    performance?: unknown;
-    risk?: unknown;
-    distribution?: unknown;
-    holdingsStock?: unknown;
-    holdingsBond?: unknown;
+    fundData?: unknown;
+    additional?: unknown;
     priceHistory?: (period: string) => unknown;
   }): FakeVanguard {
     return new FakeVanguard((url) => {
@@ -34,13 +28,8 @@ export class FakeVanguard {
         const period = url.split("/price-history/")[1] ?? "";
         return routes.priceHistory ? routes.priceHistory(period) : {};
       }
-      if (url.includes("/portfolio-holding/stock")) return routes.holdingsStock ?? {};
-      if (url.includes("/portfolio-holding/bond")) return routes.holdingsBond ?? {};
-      if (url.endsWith("/profile")) return routes.profile ?? {};
-      if (url.endsWith("/price")) return routes.price ?? {};
-      if (url.endsWith("/performance")) return routes.performance ?? {};
-      if (url.endsWith("/risk")) return routes.risk ?? {};
-      if (url.endsWith("/distribution")) return routes.distribution ?? {};
+      if (url.endsWith("-AdditionalFundData")) return routes.additional ?? {};
+      if (url.includes("/irr/funds/profile/") && url.endsWith(".json")) return routes.fundData ?? {};
       return {};
     });
   }
@@ -147,185 +136,215 @@ export function catalogEnvelope(): Record<string, unknown> {
   };
 }
 
-// ── per-fund components ──────────────────────────────────────────────────────────
+// ── per-fund documents (irr/funds/profile plane) ─────────────────────────────────
 
-/** A stock portfolio-holding envelope with two constituents (one carrying a blank sedol). */
+/** An equity fund's <T>-AdditionalFundData envelope: two stocks, a cash sweep, a future. */
 export function stockHoldingsEnvelope(): unknown {
   return {
-    size: 2,
-    asOfDate: "2026-05-31T00:00:00-04:00",
-    fund: {
-      entity: [
+    historicalPrice: { ticker: "VOO", "1Y": { nav: [{ asOfDate: "10/22/2026", price: "$702.06" }] } },
+    holdingDetails: {
+      asOfDate: "09/30/2026",
+      equityHoldings: [
         {
-          type: "portfolioHolding",
-          asOfDate: "2026-05-31T00:00:00-04:00",
-          longName: "NVIDIA Corp.",
-          shortName: "NVIDIA CORP",
-          sharesHeld: "636185341",
-          marketValue: 134324172898.74,
-          ticker: "NVDA",
-          isin: "US67066G1040",
-          percentWeight: "7.89",
-          notionalValue: "0",
-          secMainType: "",
-          secSubType: "",
-          cusip: "67066G104",
-          sedol: "2379504",
-        },
-        {
-          type: "portfolioHolding",
-          asOfDate: "2026-05-31T00:00:00-04:00",
-          longName: "Apple Inc.",
-          shortName: "APPLE INC",
-          sharesHeld: "201790031",
-          marketValue: 62688091030.46,
+          securityId: "037833100",
+          securityType: "EQ.STOCK",
+          securityMainType: "EQ",
+          securityLongDescription: "Apple Inc",
+          securityShortDescription: "APPLE INC",
+          marketValuePercentage: "7.06%",
           ticker: "AAPL",
           isin: "US0378331005",
-          percentWeight: "7.06",
-          notionalValue: "0",
-          secMainType: "",
-          secSubType: "",
           cusip: "037833100",
           sedol: "", // blank → null
+          shareQuantity: "201,790,031",
+          marketValueBaseCurrency: "$62,688,091,030",
+          faceAmount: "$201,790,031",
+          couponRate: "0.000%",
+        },
+        {
+          securityId: "67066G104",
+          securityType: "EQ.STOCK",
+          securityMainType: "EQ",
+          securityLongDescription: "NVIDIA Corp",
+          securityShortDescription: "NVIDIA CORP",
+          marketValuePercentage: "8.39%",
+          ticker: "NVDA",
+          isin: "US67066G1040",
+          cusip: "67066G104",
+          sedol: "2379504",
+          shareQuantity: "635,561,927",
+          marketValueBaseCurrency: "$145,149,632,888",
+          faceAmount: "$635,561,927",
+          couponRate: "0.000%",
         },
       ],
+      shortTermReservesHoldings: [
+        {
+          securityId: "CMT001142",
+          securityType: "MM.CASH",
+          securityMainType: "MM",
+          securityLongDescription: "MKTLIQ",
+          securityShortDescription: "MKTLIQ 12/31/2049",
+          marketValuePercentage: "0.05%",
+          cusip: "CMT001142",
+          shareQuantity: "887,152,710",
+          marketValueBaseCurrency: "$887,063,995",
+          faceAmount: "$887,152,710",
+          maturityDate: "12/31/2999",
+          couponRate: "5.359%",
+        },
+      ],
+      derivativeHoldings: [
+        {
+          securityId: "ESZ6",
+          securityType: "DE.IND",
+          securityMainType: "DE",
+          securityLongDescription: "S&P500 EMINI FUT  Dec26",
+          securityShortDescription: "S&P500 EMINI FUT  Dec26",
+          marketValuePercentage: "0.03%",
+          ticker: "ESZ6",
+          shareQuantity: "1,486",
+          marketValueBaseCurrency: "$573,261,650",
+          faceAmount: "$1,486",
+        },
+      ],
+      portfolioCompositionFile: { basketId: "01S990737", usageCode: "CRRD" },
     },
   };
 }
 
-/** A bond portfolio-holding envelope: same shape plus couponRate / maturityDate / faceAmount. */
+/** A bond fund's <T>-AdditionalFundData envelope: fixedIncomeHoldings carry coupon / maturity / face. */
 export function bondHoldingsEnvelope(): unknown {
   return {
-    size: 2,
-    asOfDate: "2026-05-31T00:00:00-04:00",
-    fund: {
-      entity: [
+    holdingDetails: {
+      asOfDate: "09/30/2026",
+      fixedIncomeHoldings: [
         {
-          type: "portfolioHolding",
-          asOfDate: "2026-05-31T00:00:00-04:00",
-          longName: "Federal National Mortgage Assn.",
-          shortName: "Federal National Mortgage Assn.",
-          sharesHeld: "0",
-          marketValue: 5597572379.98,
-          couponRate: "2.000",
-          maturityDate: "11/01/2027-06/01/2056",
-          faceAmount: "6751682408",
-          ticker: "",
-          isin: "",
-          percentWeight: "1.41",
-          notionalValue: "0",
-          cusip: "",
-          sedol: "",
+          securityId: "US91282CLW90",
+          securityType: "FI.US_GOV",
+          securityMainType: "FI",
+          securityLongDescription: "United States Treasury Note/Bond",
+          securityShortDescription: "US TREASURY N/B",
+          marketValuePercentage: "0.41%",
+          ticker: "T",
+          isin: "US91282CLW90",
+          cusip: "91282CLW9",
+          sedol: "BRK14Z4",
+          shareQuantity: "1,722,038,000",
+          marketValueBaseCurrency: "$1,610,912,735",
+          faceAmount: "$1,722,038,000",
+          maturityDate: "11/15/2034",
+          couponRate: "4.250%",
         },
         {
-          type: "portfolioHolding",
-          asOfDate: "2026-05-31T00:00:00-04:00",
-          longName: "United States Treasury Note",
-          shortName: "US TREASURY N/B",
-          sharesHeld: "0",
-          marketValue: 4200000000.0,
-          couponRate: "4.625",
-          maturityDate: "02/15/2034",
-          faceAmount: "4100000000",
+          securityId: "US3140XXXXXX",
+          securityType: "FI.MBS",
+          securityMainType: "FI",
+          securityLongDescription: "Federal National Mortgage Assn.",
+          securityShortDescription: "FNMA",
+          marketValuePercentage: "0.38%",
           ticker: "",
-          isin: "US91282CJL55",
-          percentWeight: "1.05",
-          cusip: "91282CJL5",
+          isin: "",
+          cusip: "",
           sedol: "",
+          shareQuantity: "1,600,000,000",
+          marketValueBaseCurrency: "$1,500,000,000",
+          faceAmount: "$1,600,000,000",
+          maturityDate: "06/01/2056",
+          couponRate: "2.000%",
         },
       ],
     },
   };
 }
 
-/** A per-fund profile envelope. */
-export function profileEnvelope(): unknown {
+/** A whole-fund <T>.json envelope (the slices fund_details and distributions read). */
+export function fundDataEnvelope(): unknown {
   return {
-    fundProfile: {
+    dashboard: {
       fundId: "0968",
       ticker: "VOO",
-      cusip: "922908363",
-      shortName: "S&P 500 ETF",
-      longName: "Vanguard S&P 500 ETF",
-      inceptionDate: "2010-09-07T00:00:00-04:00",
+      fundFullName: "Vanguard S&P 500 ETF",
+      managementStyle: "Index",
       category: "Large Blend",
-      expenseRatio: "0.0300",
-      isETF: true,
-      fundManagementStyle: "Index",
-      fundFact: { isStock: true, isBond: false },
+      expenseRatio: "0.03%",
+      assetClass: "Domestic Stock - General",
+      secYield: "1.00%",
+      secYieldAsOfDate: "09/30/2026",
+      navPrice: "$702.06",
+      navPriceAsOfDate: "10/22/2026",
+      marketPrice: "$702.30",
     },
-  };
-}
-
-/** A per-fund price envelope (currentPrice: premium/discount, yield, daily price, 52-week band). */
-export function priceEnvelope(): unknown {
-  return {
-    currentPrice: {
-      premiumOrDiscount: "-0.1500000000",
-      yield: { asOfDate: "2026-06-30T00:00:00-04:00", yieldPct: "1.03" },
-      dailyPrice: {
-        regular: { asOfDate: "2026-07-08T00:00:00-04:00", price: "685.30" },
-        market: { asOfDate: "2026-07-08T00:00:00-04:00", price: "685.26" },
+    content: { riskLevel: "4", levelDesc: "Moderate to Aggressive" },
+    fundFlags: { isEtf: true, isBond: false, isStock: true, isBalanced: false, isMoneyMarket: false },
+    overview: {
+      cusip: "922908363",
+      managementStyle: "Index",
+      assetClass: "Domestic Stock - General",
+      category: "Large Blend",
+      inceptionDate: "09/07/2010",
+      fundId: "0968",
+      expenseRatio: "0.03%",
+      navPrice: "$702.06",
+      navPriceAsOfDate: "10/22/2026",
+      marketPrice: "$702.30",
+    },
+    performancefees: {
+      ticker: "VOO",
+      fundId: "0968",
+      totalReturns: {
+        summary: {
+          monthEnd: {
+            asOfDate: "09/30/2026",
+            benchmarkShortName: "S&P 500 Index",
+            fundShortName: "S&P 500 ETF",
+            fundReturn: {
+              calendarYTDPct: "12.72%",
+              oneYrPct: "15.70%",
+              threeYrPct: "22.85%",
+              fiveYrPct: "13.75%",
+              tenYrPct: "15.29%",
+              sinceInceptionPct: "14.94%",
+            },
+            benchmarkReturn: { oneYrPct: "15.74%" },
+          },
+        },
       },
-      highLow: {
-        regular: { highPrice: "698.140000", lowPrice: "571.660000" },
+      historicalVolatilityMeasure: {
+        volatilityMeasure: [{ benchmarkShortName: "S&P 500 Index", rSquared: "1.00", beta: "1.00" }],
+        asOfDate: "09/30/2026",
       },
     },
-  };
-}
-
-/** A per-fund performance envelope (recentInvestmentRtn: fund + benchmark returns). */
-export function performanceEnvelope(): unknown {
-  return {
-    recentInvestmentRtn: {
-      benchmarkShortName: "S&P 500 Index",
-      fundReturn: {
-        calendarYTDPct: "10.19",
-        oneYrPct: "22.28",
-        threeYrPct: "20.58",
-        fiveYrPct: "13.36",
-        tenYrPct: "15.47",
-        sinceInceptionPct: "15.03",
-      },
-      benchmarkReturn: { oneYrPct: "22.32" },
+    price: {
+      marketPrice: "$702.30",
+      navPrice: "$702.06",
+      navPriceAsOfDate: "10/22/2026",
+      "52WeekHigh": "$716.11",
+      "52WeekLow": "$580.89",
+      premiumDiscount: "$0.24",
+      premiumDiscountPct: "-0.15%",
+      secYield: "1.00%",
+      secYieldAsOfDate: "09/30/2026",
     },
-  };
-}
-
-/** A per-fund risk envelope (level + volatility: benchmark, beta, R-squared). */
-export function riskEnvelope(): unknown {
-  return {
-    code: 4,
-    level: "Moderate to Aggressive",
-    volatility: {
-      primaryBenchmarkName: "S&P 500 Index",
-      betaPrimary: "1.00",
-      rSquaredPrimary: "1.00",
-    },
-  };
-}
-
-/** A per-fund distribution envelope (divCapGain.item[]). */
-export function distributionEnvelope(): unknown {
-  return {
-    divCapGain: {
-      distributionFrequency: "Quarterly",
-      item: [
+    distributions: {
+      asOfDate: "09/30/2026",
+      distributionSchedule: "Quarterly",
+      incomeCapitalGains: [
         {
           type: "Dividend",
-          perShareAmount: "$1.962200",
-          recordDate: "2026-06-26T00:00:00-04:00",
-          reinvestmentDate: "2026-06-26T00:00:00-04:00",
-          payableDate: "2026-06-30T00:00:00-04:00",
-          reinvestPrice: "673.33",
+          share: "$1.8226000000",
+          payableDate: "09/30/2026",
+          recordDate: "09/28/2026",
+          reInvestDate: "09/28/2026",
+          reInvestPrice: "$703.53",
         },
         {
           type: "Dividend",
-          perShareAmount: "$1.872400",
-          recordDate: "2026-03-27T00:00:00-04:00",
-          reinvestmentDate: "2026-03-27T00:00:00-04:00",
-          payableDate: "2026-03-31T00:00:00-04:00",
-          reinvestPrice: "583.19",
+          share: "$1.9622000000",
+          payableDate: "06/30/2026",
+          recordDate: "06/26/2026",
+          reInvestDate: "06/26/2026",
+          reInvestPrice: "$673.33",
         },
       ],
     },
