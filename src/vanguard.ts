@@ -225,6 +225,7 @@ export function parseProducts(json: unknown, etfOnly = true, ticker = ""): Produ
   if (!Array.isArray(entities)) return [];
   const wantTicker = ticker.trim().toUpperCase();
   const rows: ProductRow[] = [];
+  const seen = new Set<string>();
   for (const entity of entities) {
     const profile = (entity as Record<string, unknown> | null | undefined)?.profile as
       | Record<string, unknown>
@@ -234,6 +235,10 @@ export function parseProducts(json: unknown, etfOnly = true, ticker = ""): Produ
     const row = parseProductEntity(entity);
     if (!row || !row.ticker) continue;
     if (wantTicker && row.ticker.toUpperCase() !== wantTicker) continue;
+    // ticker is the products table's PRIMARY KEY (served as an engine fact): keep the first
+    // entry for a ticker and drop any repeat.
+    if (seen.has(row.ticker.toUpperCase())) continue;
+    seen.add(row.ticker.toUpperCase());
     rows.push(row);
   }
   return rows;

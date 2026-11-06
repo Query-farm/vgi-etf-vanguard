@@ -7,8 +7,26 @@
 // (vanguard.main.<fn>) so it binds/runs when the catalog is attached.
 
 import type { CatalogDescriptor, VgiFunction } from "@query-farm/vgi";
-import { Arguments } from "@query-farm/vgi";
+import { Arguments, constraintRecord } from "@query-farm/vgi";
 import { productsSchema, holdingsSchema, resultColumnsSchema } from "./schema.js";
+
+// vgi.v3 serves table constraints as canonical records that DuckDB takes as engine facts
+// (ENFORCED / ALL_ROWS only), so every record must hold for every row the scan emits. The
+// records also decide served nullability: a column is NOT NULL exactly when a NOT_NULL or
+// PRIMARY KEY record names it.
+const MAIN = ["main"];
+function primaryKey(table: string, columns: string[]) {
+  return constraintRecord({
+    schemaPath: MAIN, table, id: `${table}.pk`, kind: "PRIMARY_KEY",
+    columns: columns.map((c) => [c]), enforcement: "ENFORCED", validation: "ALL_ROWS",
+  });
+}
+function notNull(table: string, column: string) {
+  return constraintRecord({
+    schemaPath: MAIN, table, id: `${table}.${column}.not_null`, kind: "NOT_NULL",
+    columns: [[column]], enforcement: "ENFORCED", validation: "ALL_ROWS",
+  });
+}
 
 const REPO = "https://github.com/Query-farm/vgi-etf-vanguard";
 const ISSUES = `${REPO}/issues`;
@@ -283,8 +301,9 @@ export function makeCatalog(
             name: "products",
             function: productsScan,
             arguments: new Arguments([], new Map()),
-            // Each fund has a unique exchange ticker (advisory — not enforced on scan).
-            primaryKey: [["ticker"]],
+            // One row per exchange ticker: the products scan drops ticker-less entries and repeated
+            // tickers, so ticker is a guaranteed key.
+            constraints: [primaryKey("products", ["ticker"])],
             // The Vanguard US ETF lineup is ~116 funds; headroom to ~200.
             inlinedCardinality: { estimate: 116n, max: 200n },
             comment:
@@ -300,10 +319,11 @@ export function makeCatalog(
             // (fund_ticker, holding_rank) uniquely identifies a row: fund_ticker is the partition,
             // holding_rank is the 1-based per-fund position. Both are always populated by the scan.
             // Vanguard aggregates bond lots, so no natural constituent id (cusip/ticker) is unique
-            // or always present — the ordinal surrogate gives each row a stable identity. Advisory
-            // (not enforced on scan).
-            notNull: ["fund_ticker", "holding_rank"],
-            primaryKey: [["fund_ticker", "holding_rank"]],
+            // or always present — the ordinal surrogate gives each row a stable identity.
+            constraints: [
+              primaryKey("holdings", ["fund_ticker", "holding_rank"]),
+              notNull("holdings", "fund_ticker"),
+            ],
             // Hive partition key: fund_ticker. A WHERE fund_ticker = … / IN (…) filter is pushed
             // down to fetch just those funds; an unfiltered scan streams every fund (all
             // partitions). Vanguard holdings are current-only — NO time travel.

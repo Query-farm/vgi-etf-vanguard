@@ -45,8 +45,8 @@ scan streams every fund** (one partition per fund). Mechanics (mirror iShares' s
   as the `as_of_date` output column.
 - **`fund_ticker` is a SEPARATE column from `ticker`** — `ticker` is the CONSTITUENT's own ticker
   (empty for aggregated bond lots); `fund_ticker` is the requested fund ticker, upper-cased, on
-  every row. Constraints: `products` advisory PK `[ticker]`, `holdings` `notNull [fund_ticker]`
-  (advisory PKs are NOT enforced on scan). No cross-table FK (ticker/cusip/etc. recur with
+  every row. Constraints (vgi.v3 serves them as ENFORCED canonical records (`constraintRecord`), so each must hold for every scanned row): `products` PK `[ticker]` (the scan
+  drops ticker-less/repeated entries), `holdings` PK `[fund_ticker, holding_rank]` plus NOT NULL `fund_ticker`. No cross-table FK (ticker/cusip/etc. recur with
   different meanings), and VGI807/809 are waived in `vgi-lint.toml` with reasons.
 - **One holdings document per fund.** `<T>-AdditionalFundData` carries every holding group
   (`equity`, `fixedIncome`, `shortTermReserves`, `derivative`, `commodity`, `currency`); the
