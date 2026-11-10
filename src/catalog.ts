@@ -158,6 +158,7 @@ const HOLDINGS_TABLE_TAGS: Record<string, string> = {
 /** Catalog-level tags: docs, discovery, provenance, and the agent-test suite. */
 const CATALOG_TAGS: Record<string, string> = {
   "vgi.title": "Vanguard ETFs",
+  "vgi.subtitle": "Screen the Vanguard US ETF lineup and query current fund holdings, distributions and daily NAV and price history.",
   "vgi.doc_llm":
     "Vanguard US ETF data as SQL tables and table functions. Reach for it to screen the ETF " +
     "lineup on key facts (expense ratio, yield, returns), to inspect what a fund currently holds, " +
