@@ -22,7 +22,7 @@ const { registry, catalogInterface } = makeWorkerParts();
 serveVgiWorker({
   name: "vanguard",
   doc: "Vanguard US ETF data: product catalog, current holdings, and per-fund history.",
-  version: "0.3.1",
+  version: "0.4.0",
   repositoryUrl: "https://github.com/Query-farm/vgi-etf-vanguard",
   serverId: "vgi-etf-vanguard",
   registry,

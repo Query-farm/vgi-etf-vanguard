@@ -90,11 +90,14 @@ test("the functions and the products/holdings tables are exposed over HTTP", asy
     const client = new VgiClient(rpc);
     const attach = await client.catalogAttach("vanguard");
     const fns = await client.schemaContentsFunctions(attach.attach_opaque_data, "main", "TABLE_FUNCTION");
-    // holdings_scan is listed (required so the extension pushes the ticker filter into the holdings
-    // table); products' backing scan stays unlisted.
-    expect(fns.map((f) => f.name).sort()).toEqual([
+    // holdings_scan is declared in the schema's functions, so it stays public (callable from SQL).
+    // Protocol 3.3 also sends products' backing scan (so the extension sees its capabilities) but
+    // as table_only: hidden from duckdb_functions() and not callable from SQL.
+    const isPublic = (f: { visibility?: string | null }) => (f.visibility ?? "public") === "public";
+    expect(fns.filter(isPublic).map((f) => f.name).sort()).toEqual([
       "distributions", "fund_details", "holdings_scan", "nav_history",
     ]);
+    expect(fns.filter((f) => !isPublic(f)).map((f) => [f.name, f.visibility])).toEqual([["products", "table_only"]]);
     // products and holdings are base TABLES.
     const tables = await client.schemaContentsTables(attach.attach_opaque_data, "main");
     expect(tables.map((t) => t.name).sort()).toEqual(["holdings", "products"]);
