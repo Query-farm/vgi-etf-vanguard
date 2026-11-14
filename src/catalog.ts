@@ -9,6 +9,13 @@
 import type { CatalogDescriptor, VgiFunction } from "@query-farm/vgi";
 import { Arguments, constraintRecord } from "@query-farm/vgi";
 import { productsSchema, holdingsSchema, resultColumnsSchema } from "./schema.js";
+import {
+  BND_TRAILING_YIELD,
+  NVDA_ACROSS_FUNDS,
+  VOO_TOTAL_RETURN,
+  VOO_VUG_OVERLAP,
+  exampleQueriesTag,
+} from "./examples.js";
 
 // vgi.v3 serves table constraints as canonical records that DuckDB takes as engine facts
 // (ENFORCED / ALL_ROWS only), so every record must hold for every row the scan emits. The
@@ -148,8 +155,10 @@ const HOLDINGS_TABLE_TAGS: Record<string, string> = {
     "fund (over a hundred partitions — slow). Holdings are **current-only** (Vanguard reports one " +
     "as-of date; no time travel). `weight_percent` is in percent points (7.89 = 7.89%).",
   "vgi.result_columns_schema": resultColumnsSchema(holdingsSchema(), HOLDINGS_COLUMN_COMMENTS),
-  "vgi.example_queries": JSON.stringify([
+  "vgi.example_queries": exampleQueriesTag([
     { description: "Top 10 current holdings of VOO", sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 10" },
+    NVDA_ACROSS_FUNDS,
+    VOO_VUG_OVERLAP,
     { description: "Two funds at once (partition fan-out)", sql: "SELECT fund_ticker, ticker, weight_percent FROM vanguard.main.holdings WHERE fund_ticker IN ('VOO', 'VTI')" },
     { description: "A bond fund also fills coupon / maturity / face", sql: "SELECT name, coupon_percent, maturity, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'BND' LIMIT 5" },
   ]),
@@ -234,6 +243,14 @@ const CATALOG_TAGS: Record<string, string> = {
       prompt: "What has the Vanguard S&P 500 ETF's (VOO) NAV done over the past year?",
     },
     {
+      name: "mega_cap_concentration",
+      prompt:
+        "Of Vanguard's three mega-cap ETFs — Mega Cap (MGC), Mega Cap Growth (MGK) and Mega Cap " +
+        "Value (MGV) — which is the most concentrated, measured as the combined portfolio weight of " +
+        "its ten largest holdings? Give that combined weight for each of the three funds, and the " +
+        "full name and expense ratio of the most concentrated one.",
+    },
+    {
       name: "voo_last_distribution",
       prompt: "When did the Vanguard S&P 500 ETF (VOO) most recently pay a distribution, and how much?",
     },
@@ -264,10 +281,15 @@ const SCHEMA_TAGS: Record<string, string> = {
     { name: "holdings", title: "Holdings", description: "Detailed current portfolio holdings." },
     { name: "history", title: "History", description: "Per-fund distribution and NAV/price time series." },
   ]),
-  "vgi.example_queries": JSON.stringify([
+  "vgi.example_queries": exampleQueriesTag([
     { description: "Cheapest Vanguard ETFs by expense ratio", sql: "SELECT ticker, long_name, expense_ratio_percent FROM vanguard.main.products ORDER BY expense_ratio_percent LIMIT 10" },
     { description: "Top holdings of VOO", sql: "SELECT ticker, name, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 10" },
     { description: "Recent NAV history for VOO", sql: "SELECT as_of_date, nav FROM vanguard.main.nav_history('VOO', period := '1Y') ORDER BY as_of_date DESC" },
+    // Composed: two of the worker's objects in one query.
+    NVDA_ACROSS_FUNDS,
+    VOO_VUG_OVERLAP,
+    BND_TRAILING_YIELD,
+    VOO_TOTAL_RETURN,
   ]),
 };
 

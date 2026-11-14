@@ -216,6 +216,22 @@ ORDER BY as_of_date;
 windows are daily; longer windows thin to weekly (`5Y`) or monthly (`10Y`). This is **fund NAV**
 (and the exchange market price), not an intraday candle series.
 
+### Combining tables and functions
+
+The fund key (`ticker` / `fund_ticker`) joins everything, so the tables and functions compose in
+ordinary SQL. The table functions take literal arguments (not LATERAL column references), so join
+or cross-join each call:
+
+```sql
+-- NVIDIA's weight in four equity ETFs, with each fund's name and fee
+-- (VTV, a value fund, doesn't hold it and drops out of the join):
+SELECT h.fund_ticker, p.long_name, p.expense_ratio_percent, h.holding_rank, h.weight_percent
+FROM vanguard.holdings h
+JOIN vanguard.products p ON p.ticker = h.fund_ticker
+WHERE h.fund_ticker IN ('VOO', 'VTI', 'VUG', 'VTV') AND h.ticker = 'NVDA'
+ORDER BY h.weight_percent DESC;
+```
+
 ## Development
 
 ```bash

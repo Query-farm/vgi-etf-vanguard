@@ -36,6 +36,19 @@ tasks:
       SELECT count(*) > 0 FROM vanguard.main.nav_history('VOO', period := '1Y') WHERE nav > 0
     success_criteria: >-
       The answer summarizes VOO's NAV over the past year, obtained from the nav_history function.
+  # Composed (holdings aggregate + products lookup) on live data. A check_sql runs independent of
+  # the analyst's answer and could not fail on a wrong one, and live weights rule out an exact
+  # reference compare — so the judge grades the method AND the answer it shows. MGK (growth) is
+  # structurally far more top-heavy than MGC / MGV (~64% vs ~47% vs ~30% at authoring time).
+  - name: mega_cap_concentration
+    success_criteria: >-
+      Sums weight_percent over the ten largest holdings (holding_rank <= 10, or the top ten by
+      weight_percent) of each of MGC, MGK and MGV from the holdings table (fund_ticker IN
+      ('MGC', 'MGK', 'MGV')), reports all three sums, and names MGK — the Vanguard Morningstar Mega
+      Cap Growth ETF — as the most concentrated, with its expense ratio read from products (or
+      fund_details) for MGK, in percent points (about 0.05%). Fails if it sums all holdings rather
+      than the top ten, names a fund other than the one with the largest top-ten sum it shows, omits
+      a fund's sum, or quotes an expense ratio not taken from the data.
   - name: voo_last_distribution
     check_sql: >-
       SELECT count(*) > 0 FROM vanguard.main.distributions('VOO')

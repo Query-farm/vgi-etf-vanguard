@@ -56,3 +56,25 @@ query I
 SELECT (count(*) > 100)::INT FROM vg.holdings_scan() WHERE fund_ticker = 'VOO';
 ----
 1
+
+# Non-partition predicates are pushed into the scan too (DuckDB drops them from the plan), so the
+# scan must apply them: a constituent filter returns just that constituent, not the whole fund.
+query I
+SELECT (count(*) = 1 AND bool_and(ticker = 'NVDA'))::INT
+FROM vg.holdings WHERE fund_ticker = 'VOO' AND ticker = 'NVDA';
+----
+1
+
+query I
+SELECT (count(*) BETWEEN 1 AND 50 AND bool_and(weight_percent > 1))::INT
+FROM vg.holdings WHERE fund_ticker = 'VOO' AND weight_percent > 1;
+----
+1
+
+# Composed: holdings joined to products (a constituent's weight across funds, with each fund's fee).
+query I
+SELECT (count(*) = 2 AND bool_and(h.ticker = 'NVDA') AND bool_and(p.expense_ratio_percent IS NOT NULL))::INT
+FROM vg.holdings h JOIN vg.products p ON p.ticker = h.fund_ticker
+WHERE h.fund_ticker IN ('VOO', 'VTI') AND h.ticker = 'NVDA';
+----
+1

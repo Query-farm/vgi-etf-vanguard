@@ -39,6 +39,10 @@ scan streams every fund** (one partition per fund). Mechanics (mirror iShares' s
 - **No `requiredFieldFilterPaths`** — a bare scan defaults to ALL funds. Pushdown still narrows it:
   `onInit` reads `deserializeFilters(...).getColumnValues("fund_ticker")` (equality/IN).
 - **`filterPushdown: true`** on `holdingsScan` + LISTED → the extension pushes the filter in.
+- **`autoApplyFilters: true`** — DuckDB pushes EVERY simple predicate (`ticker = 'NVDA'`,
+  `weight_percent > 5`, …) into the scan and drops it from the plan, so the scan must apply them;
+  the SDK's filtering collector evaluates the full pushed set on each emitted batch. Without it a
+  constituent filter silently returned the whole fund (regression-tested in `test/sql/holdings.test`).
 - **NO `supportsTimeTravel`.** Vanguard publishes only the current holdings for a fund (one
   reported as-of date), so there is no AT coordinate and the scan reads no `p.atValue`. This is the
   key intentional difference from vgi-etf-ishares. The source's reported as-of date is still surfaced
@@ -82,6 +86,10 @@ scan streams every fund** (one partition per fund). Mechanics (mirror iShares' s
   scan), `makeHoldingsScan` (listed holdings-table scan) plus `fund_details`, `distributions`,
   `nav_history`. Callable-function state is a `{done}` flag only (fully serializable → HTTP
   transport safe). Each function is a single-shot snapshot.
+- **`src/examples.ts`** — the composed example queries (holdings ⋈ products, holdings self-join,
+  distributions × products, nav_history + distributions), each defined once and referenced from the
+  schema-level list and the driving object's list. Table functions take literal args only — DuckDB
+  rejects LATERAL column parameters for them — so compose with JOIN / CROSS JOIN / CTEs.
 - **`src/catalog.ts` / `src/worker.ts`** — catalog descriptor (no `secretTypes`) and the entry that
   wires the real client into the functions.
 

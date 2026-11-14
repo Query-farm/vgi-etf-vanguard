@@ -41,6 +41,12 @@ import {
   navHistoryBatch,
   resultColumnsSchema,
 } from "./schema.js";
+import {
+  type ExampleQuery,
+  BND_TRAILING_YIELD,
+  VOO_TOTAL_RETURN,
+  exampleQueriesTag,
+} from "./examples.js";
 
 /** The injected HTTP getter: URL in, parsed JSON out. */
 export type VanguardGet = (url: string) => Promise<unknown>;
@@ -246,6 +252,12 @@ export function makeHoldingsScan(get: VanguardGet) {
     // extension can discover the capability and push the fund_ticker filter into the scan. Each
     // fund is one SINGLE_VALUE partition (fund_ticker is the hive partition key).
     filterPushdown: true,
+    // DuckDB pushes EVERY simple WHERE predicate into the scan (e.g. `ticker = 'NVDA'`,
+    // `weight_percent > 5`) and then drops it from the plan — so the scan must apply them. onInit
+    // only uses fund_ticker to pick partitions; autoApplyFilters evaluates the whole pushed filter
+    // set on each emitted batch (without it, `WHERE fund_ticker = 'VOO' AND ticker = 'NVDA'`
+    // returned every VOO holding).
+    autoApplyFilters: true,
     partitionKind: "SINGLE_VALUE_PARTITIONS",
     maxWorkers: DEFAULT_MAX_WORKERS,
     onBind: () => ({ outputSchema: schema }),
@@ -423,6 +435,17 @@ const RANGE_DOCS = {
     "end_date because END is a reserved SQL keyword.",
 };
 
+// The source publishes a ROLLING window (~18 months), so a hard-coded calendar
+// year rots into an empty result as the window advances — derive the bounds from
+// CURRENT_DATE instead so these keep demonstrating real rows. `DATE - INTERVAL`
+// yields a TIMESTAMP in DuckDB, hence the explicit ::DATE for the DATE argument.
+const DISTRIBUTIONS_EXAMPLES: ExampleQuery[] = [
+  { description: "Recent VOO distributions", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8" },
+  { description: "Total distributions over the trailing year", sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE)" },
+  BND_TRAILING_YIELD,
+  { description: "Distributions within a bounded record-day window", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE) ORDER BY record_date" },
+];
+
 export function makeDistributionsFunction(get: VanguardGet) {
   const schema = distributionsSchema();
   return defineTableFunction<DistributionArgs, DoneState>({
@@ -455,15 +478,7 @@ export function makeDistributionsFunction(get: VanguardGet) {
       out.emit(distributionsBatch(schema, rows));
       state.done = true;
     },
-    // The source publishes a ROLLING window (~18 months), so a hard-coded calendar
-    // year rots into an empty result as the window advances — derive the bounds from
-    // CURRENT_DATE instead so these keep demonstrating real rows. `DATE - INTERVAL`
-    // yields a TIMESTAMP in DuckDB, hence the explicit ::DATE for the DATE argument.
-    examples: [
-      { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8", description: "Recent VOO distributions" },
-      { sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE)", description: "Total distributions over the trailing year" },
-      { sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE) ORDER BY record_date", description: "Distributions within a bounded record-day window" },
-    ],
+    examples: DISTRIBUTIONS_EXAMPLES,
     tags: {
       "vgi.category": "history",
       "vgi.doc_llm":
@@ -480,13 +495,9 @@ export function makeDistributionsFunction(get: VanguardGet) {
         "(not percentages). Bound the record-date range with `start_date`/`end_date` (see the " +
         "example queries). Vanguard publishes only a rolling window of about the trailing 18 " +
         "months, so bounds outside it return no rows.",
-      // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
-      // native duckdb_functions().examples carrier drops them) — VGI515.
-      "vgi.example_queries": JSON.stringify([
-        { description: "Recent VOO distributions", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO') ORDER BY record_date DESC LIMIT 8" },
-        { description: "Total distributions over the trailing year", sql: "SELECT sum(per_share_amount) AS total FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE)" },
-        { description: "Distributions within a bounded record-day window", sql: "SELECT record_date, per_share_amount FROM vanguard.main.distributions('VOO', start_date := (CURRENT_DATE - INTERVAL 1 YEAR)::DATE, end_date := (CURRENT_DATE - INTERVAL 3 MONTH)::DATE) ORDER BY record_date" },
-      ]),
+      // The same list as `examples:` above; carried here so the descriptions survive (the native
+      // duckdb_functions().examples carrier drops them) — VGI515.
+      "vgi.example_queries": exampleQueriesTag(DISTRIBUTIONS_EXAMPLES),
       "vgi.result_columns_schema": resultColumnsSchema(distributionsSchema(), DISTRIBUTIONS_DESCS),
     },
   });
@@ -502,6 +513,12 @@ interface NavHistoryArgs {
 const PERIOD_DOC =
   `The look-back window for the price series, one of ${NAV_PERIODS.join(", ")}. Defaults to 1Y. ` +
   "Shorter windows are daily; longer windows thin to weekly (5Y) or monthly (10Y).";
+
+const NAV_HISTORY_EXAMPLES: ExampleQuery[] = [
+  { description: "Daily VOO NAV over the past year", sql: "SELECT as_of_date, nav FROM vanguard.main.nav_history('VOO', period := '1Y') ORDER BY as_of_date DESC" },
+  VOO_TOTAL_RETURN,
+  { description: "10-year NAV vs market-price series (monthly points)", sql: "SELECT as_of_date, nav, market_price FROM vanguard.main.nav_history('VOO', period := '10Y') ORDER BY as_of_date" },
+];
 
 export function makeNavHistoryFunction(get: VanguardGet) {
   const schema = navHistorySchema();
@@ -533,10 +550,7 @@ export function makeNavHistoryFunction(get: VanguardGet) {
       out.emit(navHistoryBatch(schema, rows));
       state.done = true;
     },
-    examples: [
-      { sql: "SELECT as_of_date, nav FROM vanguard.main.nav_history('VOO', period := '1Y') ORDER BY as_of_date DESC", description: "Daily VOO NAV over the past year" },
-      { sql: "SELECT as_of_date, nav, market_price FROM vanguard.main.nav_history('VOO', period := '10Y') ORDER BY as_of_date", description: "10-year NAV vs market-price series (monthly points)" },
-    ],
+    examples: NAV_HISTORY_EXAMPLES,
     tags: {
       "vgi.category": "history",
       "vgi.doc_llm":
@@ -549,12 +563,9 @@ export function makeNavHistoryFunction(get: VanguardGet) {
         "NAV and market-price history over a look-back window. Pick the window with `period` " +
         "(`1M`/`1Y`/`5Y`/`10Y`, default `1Y`); longer windows return coarser points (5Y weekly, " +
         "10Y monthly). This is **fund NAV**, not an intraday candle series (see the example queries).",
-      // Byte-identical SQL to the `examples:` above; carried here so the descriptions survive (the
-      // native duckdb_functions().examples carrier drops them) — VGI515.
-      "vgi.example_queries": JSON.stringify([
-        { description: "Daily VOO NAV over the past year", sql: "SELECT as_of_date, nav FROM vanguard.main.nav_history('VOO', period := '1Y') ORDER BY as_of_date DESC" },
-        { description: "10-year NAV vs market-price series (monthly points)", sql: "SELECT as_of_date, nav, market_price FROM vanguard.main.nav_history('VOO', period := '10Y') ORDER BY as_of_date" },
-      ]),
+      // The same list as `examples:` above; carried here so the descriptions survive (the native
+      // duckdb_functions().examples carrier drops them) — VGI515.
+      "vgi.example_queries": exampleQueriesTag(NAV_HISTORY_EXAMPLES),
       "vgi.result_columns_schema": resultColumnsSchema(navHistorySchema(), NAV_HISTORY_DESCS),
     },
   });
