@@ -282,3 +282,7 @@ with or endorsed by The Vanguard Group.
 ## License
 
 MIT — Copyright 2026 Query Farm LLC · https://query.farm
+
+## Executed notebook
+
+[Compare reported NAV and market prices](notebooks/README.md) with live daily histories, a basis-point experiment, and a portable published worker.
