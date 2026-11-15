@@ -314,8 +314,8 @@ export function makeCatalog(
     name: "vanguard",
     defaultSchema: "main",
     comment:
-      "Vanguard US ETF data as DuckDB tables: products (catalog) & holdings (fund-partitioned, " +
-      "current-only) tables, plus fund_details, distributions, nav_history — vgi-etf-vanguard",
+      "Vanguard US ETF data from Vanguard's public product feed: screen the lineup on fund facts, " +
+      "inspect what a fund currently holds, and pull per-fund distribution and NAV/price history — vgi-etf-vanguard",
     sourceUrl: REPO,
     tags: CATALOG_TAGS,
     schemas: [
