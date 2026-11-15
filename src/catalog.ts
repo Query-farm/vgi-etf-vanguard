@@ -174,7 +174,8 @@ const CATALOG_TAGS: Record<string, string> = {
     "and to pull per-fund history like distributions and NAV/price series. The central concept is " +
     "the fund, identified by its exchange ticker (e.g. VOO); start from the catalog to find that " +
     "key, then drill into a specific fund. Holdings are current-only (no historical as-of). Data " +
-    "is Vanguard's public product feed: best-effort, for informational use.",
+    "is Vanguard's public product feed: best-effort, for informational use." +
+    " Upstream source: https://investor.vanguard.com/investment-products/list/etfs.",
   "vgi.doc_md":
     "## Vanguard ETFs\n\n" +
     "Vanguard US ETF data, exposed as DuckDB tables and table functions.\n\n" +
@@ -182,6 +183,10 @@ const CATALOG_TAGS: Record<string, string> = {
     "at the catalog to discover that key, then drill into a fund. Fund holdings are " +
     "**current-only**: Vanguard reports a single as-of date per fund, so there is no historical " +
     "time travel (unlike some other providers).\n\n" +
+    "### Sources\n\n" +
+    "- [Vanguard ETF list](https://investor.vanguard.com/investment-products/list/etfs) — the US ETF lineup the catalog is read from.\n" +
+    "- [Example fund profile (VOO)](https://investor.vanguard.com/investment-products/etfs/profile/voo) — a fund page with the holdings, distributions and price history exposed here.\n" +
+    "\n" +
     "Data is provided for informational use; review Vanguard's terms before redistribution.",
   "vgi.keywords": JSON.stringify([
     "ETF",
