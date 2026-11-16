@@ -39,7 +39,7 @@ Every [GitHub release](https://github.com/Query-farm/vgi-etf-vanguard/releases) 
 INSTALL vgi FROM community;
 LOAD vgi;
 
-ATTACH 'vanguard' AS vanguard (TYPE vgi, LOCATION 'github-auto://Query-farm/vgi-etf-vanguard@v0.4.1');
+ATTACH 'vanguard' AS vanguard (TYPE vgi, LOCATION 'github-auto://Query-farm/vgi-etf-vanguard@v0.4.2');
 
 -- The cheapest Vanguard ETFs by expense ratio
 SELECT ticker, long_name, expense_ratio_percent FROM vanguard.main.products ORDER BY expense_ratio_percent LIMIT 5;
@@ -48,7 +48,7 @@ SELECT ticker, long_name, expense_ratio_percent FROM vanguard.main.products ORDE
 SELECT ticker, name, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 5;
 ```
 
-Prebuilt binaries cover macOS (Apple silicon), Linux (x86-64 and arm64). `github-auto://` needs an explicit release tag; change `@v0.4.1` to move to a newer release.
+Prebuilt binaries cover macOS (Apple silicon), Linux (x86-64 and arm64). `github-auto://` needs an explicit release tag; change `@v0.4.2` to move to a newer release.
 
 ### Other ways to run it
 
