@@ -39,7 +39,7 @@ Every [GitHub release](https://github.com/Query-farm/vgi-etf-vanguard/releases) 
 INSTALL vgi FROM community;
 LOAD vgi;
 
-ATTACH 'vanguard' AS vanguard (TYPE vgi, LOCATION 'github-auto://Query-farm/vgi-etf-vanguard@v0.4.3');
+ATTACH 'vanguard' AS vanguard (TYPE vgi, LOCATION 'github-auto://Query-farm/vgi-etf-vanguard@v0.5.0');
 
 -- The cheapest Vanguard ETFs by expense ratio
 SELECT ticker, long_name, expense_ratio_percent FROM vanguard.main.products ORDER BY expense_ratio_percent LIMIT 5;
@@ -48,7 +48,7 @@ SELECT ticker, long_name, expense_ratio_percent FROM vanguard.main.products ORDE
 SELECT ticker, name, weight_percent FROM vanguard.main.holdings WHERE fund_ticker = 'VOO' ORDER BY weight_percent DESC LIMIT 5;
 ```
 
-Prebuilt binaries cover macOS (Apple silicon), Linux (x86-64 and arm64). `github-auto://` needs an explicit release tag; change `@v0.4.3` to move to a newer release.
+Prebuilt binaries cover macOS (Apple silicon), Linux (x86-64 and arm64). `github-auto://` needs an explicit release tag; change `@v0.5.0` to move to a newer release.
 
 ### Other ways to run it
 
@@ -244,8 +244,8 @@ bun run typecheck   # own-source typecheck (see scripts/typecheck.sh)
 The E2E suite needs the haybarn runner and the vgi extension, once:
 
 ```bash
-uv tool install --prerelease allow 'haybarn-unittest>=2.0.0rc11,<2.1'
-echo "INSTALL vgi FROM community;" | uvx --prerelease allow --from 'haybarn-cli>=2.0.0rc11,<2.1' haybarn-cli
+uv tool install --prerelease allow 'haybarn-unittest>=2.0.1rc3,<2.1'
+echo "INSTALL vgi FROM community;" | uvx --prerelease allow --from 'haybarn-cli>=2.0.1rc3,<2.1' haybarn-cli
 ```
 
 Metadata quality is graded by [`vgi-lint`](https://github.com/Query-farm/vgi-lint-check); CI runs
